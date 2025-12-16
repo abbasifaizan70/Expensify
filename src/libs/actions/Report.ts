@@ -71,6 +71,8 @@ import getEnvironment from '@libs/Environment/getEnvironment';
 import type EnvironmentType from '@libs/Environment/getEnvironment/types';
 import {getMicroSecondOnyxErrorWithTranslationKey, getMicroSecondTranslationErrorWithTranslationKey} from '@libs/ErrorUtils';
 import fileDownload from '@libs/fileDownload';
+import {compute} from '@libs/Formula';
+import type {FormulaContext} from '@libs/Formula';
 import HttpUtils from '@libs/HttpUtils';
 import Log from '@libs/Log';
 import {isEmailPublicDomain} from '@libs/LoginUtils';
@@ -164,7 +166,6 @@ import {
     isSelfDM,
     isUnread,
     isValidReportIDFromPath,
-    populateOptimisticReportFormula,
     prepareOnboardingOnyxData,
 } from '@libs/ReportUtils';
 import {getCurrentSearchQueryJSON} from '@libs/SearchQueryUtils';
@@ -5267,11 +5268,13 @@ function deleteAppReport(reportID: string | undefined, currentUserEmailParam: st
  * Moves an IOU report to a policy by converting it to an expense report
  * @param reportID - The ID of the IOU report to move
  * @param policy - The policy to move the report to
+ * @param reportTransactions - The transactions associated with this IOU report
  * @param isFromSettlementButton - Whether the action is from report preview
  */
 function moveIOUReportToPolicy(
     reportID: string,
     policy: Policy,
+    reportTransactions: Transaction[],
     isFromSettlementButton?: boolean,
 ): {policyExpenseChatReportID?: string; useTemporaryOptimisticExpenseChatReportID: boolean} | undefined {
     const iouReport = allReports?.[`${ONYXKEYS.COLLECTION.REPORT}${reportID}`];
@@ -5299,6 +5302,7 @@ function moveIOUReportToPolicy(
         policy,
         policyID,
         optimisticExpenseChatReportID,
+        reportTransactions,
     );
 
     const parameters: MoveIOUReportToExistingPolicyParams = {
@@ -5316,10 +5320,12 @@ function moveIOUReportToPolicy(
 /**
  * Moves an IOU report to a policy by converting it to an expense report
  * @param reportID - The ID of the IOU report to move
+ * @param reportTransactions - The transactions associated with this IOU report
  */
 function moveIOUReportToPolicyAndInviteSubmitter(
     reportID: string,
     policy: Policy,
+    reportTransactions: Transaction[],
     formatPhoneNumber: LocaleContextProps['formatPhoneNumber'],
 ): {policyExpenseChatReportID?: string} | undefined {
     const iouReport = allReports?.[`${ONYXKEYS.COLLECTION.REPORT}${reportID}`];
@@ -5425,7 +5431,7 @@ function moveIOUReportToPolicyAndInviteSubmitter(
         failureData: convertedFailureData,
         movedExpenseReportAction,
         movedReportAction,
-    } = convertIOUReportToExpenseReport(iouReport, policy, policyID, optimisticPolicyExpenseChatReportID);
+    } = convertIOUReportToExpenseReport(iouReport, policy, policyID, optimisticPolicyExpenseChatReportID, reportTransactions);
 
     optimisticData.push(...convertedOptimisticData);
     successData.push(...convertedSuccessData);
@@ -5444,7 +5450,13 @@ function moveIOUReportToPolicyAndInviteSubmitter(
     return {policyExpenseChatReportID: optimisticPolicyExpenseChatReportID};
 }
 
-function convertIOUReportToExpenseReport(iouReport: Report, policy: Policy, policyID: string, optimisticPolicyExpenseChatReportID: string) {
+function convertIOUReportToExpenseReport(
+    iouReport: Report,
+    policy: Policy,
+    policyID: string,
+    optimisticPolicyExpenseChatReportID: string,
+    reportTransactions: Transaction[],
+) {
     const optimisticData: OnyxUpdate[] = [];
     const successData: OnyxUpdate[] = [];
     const failureData: OnyxUpdate[] = [];
@@ -5468,7 +5480,21 @@ function convertIOUReportToExpenseReport(iouReport: Report, policy: Policy, poli
 
     const titleReportField = getTitleReportField(getReportFieldsByPolicyID(policyID) ?? {});
     if (!!titleReportField && isPaidGroupPolicy(policy)) {
-        expenseReport.reportName = populateOptimisticReportFormula(titleReportField.defaultValue, expenseReport, policy);
+        // Convert transactions array to Record<string, Transaction> for FormulaContext
+        const allTransactions: Record<string, Transaction> = {};
+        reportTransactions.forEach((transaction) => {
+            if (transaction?.transactionID) {
+                allTransactions[transaction.transactionID] = transaction;
+            }
+        });
+
+        const formulaContext: FormulaContext = {
+            report: expenseReport,
+            policy,
+            allTransactions,
+        };
+        const computedName = compute(titleReportField.defaultValue, formulaContext);
+        expenseReport.reportName = computedName || expenseReport.reportName;
     }
 
     const reportID = iouReport.reportID;
@@ -5485,7 +5511,7 @@ function convertIOUReportToExpenseReport(iouReport: Report, policy: Policy, poli
     });
 
     // The expense report transactions need to have the amount reversed to negative values
-    const reportTransactions = getReportTransactions(reportID);
+    // Use the transactions passed from UI components instead of fetching internally
 
     // For performance reasons, we are going to compose a merge collection data for transactions
     const transactionsOptimisticData: Record<string, Transaction> = {};
