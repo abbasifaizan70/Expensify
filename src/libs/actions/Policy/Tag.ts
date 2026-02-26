@@ -28,11 +28,12 @@ import * as PolicyUtils from '@libs/PolicyUtils';
 import {goBackWhenEnableFeature} from '@libs/PolicyUtils';
 import {pushTransactionViolationsOnyxData} from '@libs/ReportUtils';
 import {getTagArrayFromName} from '@libs/TransactionUtils';
+import ViolationsUtils from '@libs/Violations/ViolationsUtils';
 import type {PolicyTagList} from '@pages/workspace/tags/types';
 import {completeTask} from '@userActions/Task';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
-import type {ImportedSpreadsheet, Policy, PolicyTag, PolicyTagLists, PolicyTags, RecentlyUsedTags, Report} from '@src/types/onyx';
+import type {ImportedSpreadsheet, Policy, PolicyCategories, PolicyTag, PolicyTagLists, PolicyTags, RecentlyUsedTags, Report, Transaction, TransactionViolation} from '@src/types/onyx';
 import type {OnyxValueWithOfflineFeedback} from '@src/types/onyx/OnyxCommon';
 import type {ApprovalRule} from '@src/types/onyx/Policy';
 import type {OnyxData} from '@src/types/onyx/Request';
@@ -1280,6 +1281,113 @@ function downloadMultiLevelTagsCSV(policyID: string, onDownloadFailed: () => voi
     }
 
     fileDownload(translate, ApiUtils.getCommandURL({command}), fileName, '', false, formData, CONST.NETWORK.METHOD.POST, onDownloadFailed);
+}
+
+let allTransactionsForTagViolations: Record<string, Transaction> = {};
+Onyx.connectWithoutView({
+    key: ONYXKEYS.COLLECTION.TRANSACTION,
+    waitForCollectionCallback: true,
+    callback: (value) => {
+        allTransactionsForTagViolations = value ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, Transaction] => !!entry[1])) : {};
+        ensureTagViolationsExist();
+    },
+});
+
+let allPoliciesForTagViolations: Record<string, Policy> = {};
+Onyx.connectWithoutView({
+    key: ONYXKEYS.COLLECTION.POLICY,
+    waitForCollectionCallback: true,
+    callback: (value) => {
+        allPoliciesForTagViolations = value ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, Policy] => !!entry[1])) : {};
+    },
+});
+
+let allPolicyCategoriesForTagViolations: Record<string, PolicyCategories> = {};
+Onyx.connectWithoutView({
+    key: ONYXKEYS.COLLECTION.POLICY_CATEGORIES,
+    waitForCollectionCallback: true,
+    callback: (value) => {
+        allPolicyCategoriesForTagViolations = value
+            ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, PolicyCategories] => !!entry[1]))
+            : {};
+    },
+});
+
+let allReportsForTagViolations: Record<string, Report> = {};
+Onyx.connectWithoutView({
+    key: ONYXKEYS.COLLECTION.REPORT,
+    waitForCollectionCallback: true,
+    callback: (value) => {
+        allReportsForTagViolations = value ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, Report] => !!entry[1])) : {};
+    },
+});
+
+let allPolicyTagsForViolations: Record<string, PolicyTagLists> = {};
+Onyx.connectWithoutView({
+    key: ONYXKEYS.COLLECTION.POLICY_TAGS,
+    waitForCollectionCallback: true,
+    callback: (value) => {
+        allPolicyTagsForViolations = value
+            ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, PolicyTagLists] => !!entry[1]))
+            : {};
+        ensureTagViolationsExist();
+    },
+});
+
+let allViolationsForTagCheck: Record<string, TransactionViolation[]> = {};
+Onyx.connectWithoutView({
+    key: ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS,
+    waitForCollectionCallback: true,
+    callback: (value) => {
+        allViolationsForTagCheck = value
+            ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, TransactionViolation[]] => !!entry[1]))
+            : {};
+        ensureTagViolationsExist();
+    },
+});
+
+function ensureTagViolationsExist() {
+    for (const [transactionKey, transaction] of Object.entries(allTransactionsForTagViolations)) {
+        if (!transaction?.tag) {
+            continue;
+        }
+        const transactionTag = transaction.tag;
+        const transactionID = transactionKey.replace(ONYXKEYS.COLLECTION.TRANSACTION, '');
+        const violationKey = `${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}`;
+        const txViolations = allViolationsForTagCheck[violationKey] ?? [];
+
+        if (txViolations.some((v) => v.name === CONST.VIOLATIONS.TAG_OUT_OF_POLICY)) {
+            continue;
+        }
+
+        const report = allReportsForTagViolations[`${ONYXKEYS.COLLECTION.REPORT}${transaction.reportID}`];
+        if (!report?.policyID) {
+            continue;
+        }
+
+        const policyTagLists = allPolicyTagsForViolations[`${ONYXKEYS.COLLECTION.POLICY_TAGS}${report.policyID}`];
+        if (!policyTagLists) {
+            continue;
+        }
+
+        const isTagInPolicy = Object.values(policyTagLists).some((tagList) => !!tagList?.tags?.[transactionTag]?.enabled);
+        if (isTagInPolicy) {
+            continue;
+        }
+
+        const policy = allPoliciesForTagViolations[`${ONYXKEYS.COLLECTION.POLICY}${report.policyID}`];
+        if (!policy || !PolicyUtils.isPaidGroupPolicy(policy)) {
+            continue;
+        }
+
+        const policyCategories = allPolicyCategoriesForTagViolations[`${ONYXKEYS.COLLECTION.POLICY_CATEGORIES}${report.policyID}`] ?? {};
+        const policyHasDependentTags = PolicyUtils.hasDependentTags(policy, policyTagLists);
+        const updatedViolations = ViolationsUtils.getViolationsOnyxData(transaction, txViolations, policy, policyTagLists, policyCategories, policyHasDependentTags, false);
+
+        if (Array.isArray(updatedViolations?.value) && updatedViolations.value.some((v) => v.name === CONST.VIOLATIONS.TAG_OUT_OF_POLICY)) {
+            Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}`, updatedViolations.value as TransactionViolation[]);
+        }
+    }
 }
 
 export {
