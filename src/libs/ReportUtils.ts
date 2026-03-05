@@ -12981,16 +12981,22 @@ function shouldHideSingleReportField(reportField: PolicyReportField) {
 }
 
 /**
- * Get both field values map and fields-by-name map in a single pass
+ * Get both field values map and fields-by-name map in a single pass.
+ * Uses normalized field keys (lowercase, spaces to underscores) so formula references
+ * like {field:STATUS_MIRROR} match field names like "STATUS MIRROR".
  */
 function getReportFieldMaps(report: OnyxEntry<Report>, fieldList: Record<string, PolicyReportField>): {fieldValues: Record<string, string>; fieldsByName: Record<string, PolicyReportField>} {
     const fields = getAvailableReportFields(report, Object.values(fieldList ?? {}));
     const fieldValues: Record<string, string> = {};
     const fieldsByName: Record<string, PolicyReportField> = {};
 
+    // Use same normalization as Formula.compute so {field:X} lookups match
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const {getNormalizedReportFieldKey} = require('./Formula') as {getNormalizedReportFieldKey: (name: string) => string};
+
     for (const field of fields) {
         if (field.name) {
-            const key = field.name.toLowerCase();
+            const key = getNormalizedReportFieldKey(field.name);
             fieldValues[key] = field.value ?? field.defaultValue ?? '';
             fieldsByName[key] = field;
         }

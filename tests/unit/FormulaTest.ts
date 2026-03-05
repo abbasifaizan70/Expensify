@@ -1563,6 +1563,35 @@ describe('CustomFormula', () => {
             expect(compute('{field:MYFIELD}', {report: mockReport, policy: mockPolicy, fieldsByName, fieldValues})).toBe('test_value');
             expect(compute('{field:myfield}', {report: mockReport, policy: mockPolicy, fieldsByName, fieldValues})).toBe('test_value');
         });
+
+        test('should resolve formula reference with underscore when field name has space (STATUS MIRROR / STATUS_MIRROR)', () => {
+            // Simulates getReportFieldMaps using normalized keys: "STATUS MIRROR" -> "status_mirror"
+            const fieldsByName = {
+                status: {
+                    fieldID: 'field_status',
+                    name: 'STATUS',
+                    defaultValue: '',
+                    value: 'Approved',
+                } as unknown as PolicyReportField,
+                status_mirror: {
+                    fieldID: 'field_status_mirror',
+                    name: 'STATUS MIRROR',
+                    defaultValue: '{field:STATUS}',
+                    value: 'stale',
+                } as unknown as PolicyReportField,
+                summary: {
+                    fieldID: 'field_summary',
+                    name: 'SUMMARY',
+                    defaultValue: '{field:STATUS_MIRROR}',
+                    value: 'stale',
+                } as unknown as PolicyReportField,
+            };
+            const fieldValues = {status: 'Approved', status_mirror: 'stale', summary: 'stale'};
+
+            // SUMMARY formula is {field:STATUS_MIRROR}; STATUS MIRROR has formula {field:STATUS}. Both should resolve.
+            const result = compute('{field:SUMMARY}', {report: mockReport, policy: mockPolicy, fieldsByName, fieldValues});
+            expect(result).toBe('Approved');
+        });
     });
 
     describe('resolveReportFieldValue', () => {

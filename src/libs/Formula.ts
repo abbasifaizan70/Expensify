@@ -431,6 +431,17 @@ function formatStatus(statusNum: number | undefined): string {
 }
 
 /**
+ * Normalize a report field name for lookup so that formula references match field names
+ * regardless of spaces vs underscores (e.g. "STATUS MIRROR" and "STATUS_MIRROR" both become "status_mirror").
+ */
+function getNormalizedReportFieldKey(name: string): string {
+    return name
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+}
+
+/**
  * Check if a formula string contains field references ({field:X})
  * Uses quick string check before expensive parsing for performance
  */
@@ -446,7 +457,8 @@ function hasFieldReferences(formula: string | undefined): boolean {
  * Compute the value of a field formula part with recursive resolution support
  */
 function computeFieldPart(part: FormulaPart, context?: FormulaContext): string {
-    const fieldName = part.fieldPath.at(0)?.toLowerCase();
+    const rawFieldName = part.fieldPath.at(0) ?? '';
+    const fieldName = getNormalizedReportFieldKey(rawFieldName);
 
     if (!fieldName) {
         return part.definition;
@@ -971,6 +983,6 @@ function resolveReportFieldValue(
     return compute(field.defaultValue, {report, policy, fieldValues, fieldsByName});
 }
 
-export {FORMULA_PART_TYPES, compute, parse, hasCircularReferences, resolveReportFieldValue};
+export {FORMULA_PART_TYPES, compute, getNormalizedReportFieldKey, hasCircularReferences, parse, resolveReportFieldValue};
 
 export type {FormulaContext, FieldList, MinimalTransaction};

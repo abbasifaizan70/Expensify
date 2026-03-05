@@ -20,7 +20,7 @@ import {
     isReportApproved,
     isSettled,
 } from './ReportUtils';
-import {hasSubmissionBlockingViolations, isPending, isScanning} from './TransactionUtils';
+import {hasSubmissionBlockingViolations, isFetchingWaypointsFromServer, isPending, isScanning} from './TransactionUtils';
 
 function canSubmit(
     report: Report,
@@ -46,6 +46,10 @@ function canSubmit(
     }
 
     const isAnyReceiptBeingScanned = transactions?.some((transaction) => isScanning(transaction));
+
+    if (transactions?.some((transaction) => isFetchingWaypointsFromServer(transaction))) {
+        return false;
+    }
 
     if (transactions?.some((transaction) => hasSubmissionBlockingViolations(transaction, violations, currentUserEmail, currentUserAccountID, report, policy))) {
         return false;

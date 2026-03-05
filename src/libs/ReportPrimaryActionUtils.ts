@@ -50,6 +50,7 @@ import {
     getTransactionViolations,
     hasPendingRTERViolation as hasPendingRTERViolationTransactionUtils,
     hasSubmissionBlockingViolations,
+    isFetchingWaypointsFromServer,
     isDuplicate,
     isOnHold as isOnHoldTransactionUtils,
     isPending,
@@ -118,6 +119,10 @@ function isSubmitAction(
     const isAnyReceiptBeingScanned = reportTransactions?.some((transaction) => isScanning(transaction));
 
     if (isAnyReceiptBeingScanned) {
+        return false;
+    }
+
+    if (reportTransactions.some((transaction) => isFetchingWaypointsFromServer(transaction))) {
         return false;
     }
 
