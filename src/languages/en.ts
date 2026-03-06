@@ -525,6 +525,7 @@ const translations = {
         task: 'Task',
         trip: 'Trip',
         apply: 'Apply',
+        action: 'Action',
         status: 'Status',
         on: 'On',
         before: 'Before',

@@ -79,6 +79,11 @@ const baseFilterConfig = {
         description: 'common.status' as const,
         route: ROUTES.SEARCH_ADVANCED_FILTERS.getRoute(CONST.SEARCH.SYNTAX_FILTER_KEYS.STATUS),
     },
+    action: {
+        getTitle: getFilterDisplayTitle,
+        description: 'common.action' as const,
+        route: ROUTES.SEARCH_ADVANCED_FILTERS.getRoute(CONST.SEARCH.SYNTAX_FILTER_KEYS.ACTION),
+    },
     date: {
         getTitle: getFilterDisplayTitle,
         description: 'common.date' as const,
