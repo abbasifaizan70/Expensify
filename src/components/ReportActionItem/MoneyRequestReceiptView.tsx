@@ -177,6 +177,7 @@ function MoneyRequestReceiptView({report, readonly = false, updatedTransaction, 
     const pendingAction = transaction?.pendingAction;
     // Need to return undefined when we have pendingAction to avoid the duplicate pending action
     const getPendingFieldAction = (fieldPath: TransactionPendingFieldsKey) => (pendingAction ? undefined : transaction?.pendingFields?.[fieldPath]);
+    const receiptSectionPendingAction = getPendingFieldAction('receipt') ?? pendingAction;
 
     const transactionToCheck = updatedTransaction ?? transaction;
     const doesTransactionHaveReceipt = !!transactionToCheck?.receipt && !isEmptyObject(transactionToCheck?.receipt);
@@ -363,7 +364,7 @@ function MoneyRequestReceiptView({report, readonly = false, updatedTransaction, 
     return (
         <View style={fillSpace ? styles.flex1 : styles.pRelative}>
             {shouldShowReceiptAudit && (
-                <OfflineWithFeedback pendingAction={getPendingFieldAction('receipt')}>
+                <OfflineWithFeedback pendingAction={receiptSectionPendingAction}>
                     <ReceiptAudit
                         notes={receiptViolations}
                         shouldShowAuditResult={!!shouldShowAuditMessage}
@@ -372,7 +373,7 @@ function MoneyRequestReceiptView({report, readonly = false, updatedTransaction, 
             )}
             {shouldShowReceiptEmptyState && (
                 <OfflineWithFeedback
-                    pendingAction={getPendingFieldAction('receipt')}
+                    pendingAction={receiptSectionPendingAction}
                     style={[styles.mt3, isEmptyObject(errors) && styles.mb3, styles.flex1]}
                     contentContainerStyle={styles.flex1}
                 >
@@ -396,7 +397,7 @@ function MoneyRequestReceiptView({report, readonly = false, updatedTransaction, 
             )}
             {(hasReceipt || !isEmptyObject(errors)) && (
                 <OfflineWithFeedback
-                    pendingAction={isDistanceRequest ? getPendingFieldAction('waypoints') : getPendingFieldAction('receipt')}
+                    pendingAction={isDistanceRequest ? getPendingFieldAction('waypoints') ?? pendingAction : receiptSectionPendingAction}
                     errors={errors}
                     errorRowStyles={[styles.mh4, !shouldShowReceiptEmptyState && styles.mt3]}
                     onClose={() => {

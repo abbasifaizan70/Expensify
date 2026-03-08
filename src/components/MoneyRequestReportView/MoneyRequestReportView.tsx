@@ -256,6 +256,7 @@ function MoneyRequestReportView({report, policy, reportMetadata, shouldDisplayRe
                 errors={reportErrors}
                 onClose={dismissReportCreationError}
                 needsOffscreenAlphaCompositing
+                shouldDisableOpacity
                 style={styles.flex1}
                 contentContainerStyle={styles.flex1}
                 errorRowStyles={[styles.ph5, styles.mv2]}
