@@ -50,6 +50,8 @@ function OptionRowLHNData({
     ...propsToForward
 }: OptionRowLHNDataProps) {
     const reportID = propsToForward.reportID;
+    const [draftComment] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_DRAFT_COMMENT}${reportID}`);
+    const hasDraftComment = !!draftComment && !draftComment.match(CONST.REGEX.EMPTY_COMMENT);
     const {currentReportID: currentReportIDValue} = useCurrentReportIDState();
     const isReportFocused = isOptionFocused && currentReportIDValue === reportID;
     const optionItemRef = useRef<OptionData | undefined>(undefined);
@@ -159,6 +161,7 @@ function OptionRowLHNData({
         <OptionRowLHN
             // eslint-disable-next-line react/jsx-props-no-spreading
             {...propsToForward}
+            hasDraftComment={hasDraftComment}
             isOptionFocused={isReportFocused}
             optionItem={finalOptionItem}
             report={fullReport}
