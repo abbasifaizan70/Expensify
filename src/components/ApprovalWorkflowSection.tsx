@@ -11,10 +11,12 @@ import {sortAlphabetically} from '@libs/OptionsListUtils';
 import {getApprovalLimitDescription} from '@libs/WorkflowUtils';
 import CONST from '@src/CONST';
 import type ApprovalWorkflow from '@src/types/onyx/ApprovalWorkflow';
+import Avatar from './Avatar';
 import Icon from './Icon';
 import MenuItem from './MenuItem';
 import PressableWithoutFeedback from './Pressable/PressableWithoutFeedback';
 import Text from './Text';
+import Tooltip from './Tooltip';
 
 type ApprovalWorkflowSectionProps = {
     /** Single workflow displayed in this component */
@@ -26,6 +28,13 @@ type ApprovalWorkflowSectionProps = {
     /** Currency used for formatting approval limits */
     currency?: string;
 };
+
+type UserPill = {
+    email: string;
+    displayName: string;
+};
+
+const MAX_VISIBLE_PILLS = 8;
 
 function ApprovalWorkflowSection({approvalWorkflow, onPress, currency = CONST.CURRENCY.USD}: ApprovalWorkflowSectionProps) {
     const icons = useMemoizedLazyExpensifyIcons(['ArrowRight', 'Lightbulb', 'Users', 'UserCheck']);
@@ -43,6 +52,54 @@ function ApprovalWorkflowSection({approvalWorkflow, onPress, currency = CONST.CU
         : sortAlphabetically(approvalWorkflow.members, 'displayName', localeCompare)
               .map((m) => Str.removeSMSDomain(m.displayName))
               .join(', ');
+
+    const renderUserPills = (users: UserPill[]) => {
+        const visibleUsers = users.slice(0, MAX_VISIBLE_PILLS);
+        const hiddenUsers = users.slice(MAX_VISIBLE_PILLS);
+        const hiddenUsersTooltip = hiddenUsers.map(({displayName}) => Str.removeSMSDomain(displayName)).join(', ');
+
+        return (
+            <View style={[styles.flexRow, styles.flexWrap, styles.mt1]}>
+                {visibleUsers.map((user) => {
+                    const cleanDisplayName = Str.removeSMSDomain(user.displayName);
+                    const personalDetail = personalDetailsByEmail?.[user.email];
+
+                    return (
+                        <View
+                            key={user.email}
+                            style={styles.workflowUserPill}
+                        >
+                            <Avatar
+                                size={CONST.AVATAR_SIZE.SMALL}
+                                source={personalDetail?.avatar}
+                                name={cleanDisplayName}
+                                type={CONST.ICON_TYPE_AVATAR}
+                                avatarID={personalDetail?.accountID}
+                            />
+                            <Text
+                                style={[styles.textLabelSupporting, styles.ml2, styles.flexShrink1, styles.workflowUserPillText]}
+                                numberOfLines={1}
+                            >
+                                {cleanDisplayName}
+                            </Text>
+                        </View>
+                    );
+                })}
+                {hiddenUsers.length > 0 && (
+                    <Tooltip text={hiddenUsersTooltip}>
+                        <PressableWithoutFeedback
+                            accessibilityRole="button"
+                            style={styles.workflowUserPill}
+                            onPress={onPress}
+                            accessibilityLabel={`${hiddenUsers.length} ${translate('common.more')}`}
+                        >
+                            <Text style={[styles.textLabelSupporting, styles.textStrong]}>{`+${hiddenUsers.length} ${translate('common.more').toLowerCase()}`}</Text>
+                        </PressableWithoutFeedback>
+                    </Tooltip>
+                )}
+            </View>
+        );
+    };
     return (
         <PressableWithoutFeedback
             accessibilityRole="button"
@@ -75,9 +132,6 @@ function ApprovalWorkflowSection({approvalWorkflow, onPress, currency = CONST.CU
                     title={translate('workflowsExpensesFromPage.title')}
                     style={styles.p0}
                     titleStyle={styles.textLabelSupportingNormal}
-                    descriptionTextStyle={[styles.textNormalThemeText, styles.lineHeightXLarge]}
-                    description={members}
-                    numberOfLinesDescription={4}
                     shouldBeAccessible={false}
                     tabIndex={-1}
                     icon={icons.Users}
@@ -87,6 +141,7 @@ function ApprovalWorkflowSection({approvalWorkflow, onPress, currency = CONST.CU
                     onPress={onPress}
                     shouldRemoveBackground
                     sentryLabel={CONST.SENTRY_LABEL.WORKSPACE.WORKFLOWS.APPROVAL_SECTION_EXPENSES_FROM}
+                    titleComponent={approvalWorkflow.isDefault ? <Text style={[styles.textNormalThemeText, styles.lineHeightXLarge, styles.mt1]}>{members}</Text> : renderUserPills(approvalWorkflow.members)}
                 />
 
                 {approvalWorkflow.approvers.map((approver, index) => (
@@ -97,20 +152,18 @@ function ApprovalWorkflowSection({approvalWorkflow, onPress, currency = CONST.CU
                             title={approverTitle(index)}
                             style={styles.p0}
                             titleStyle={styles.textLabelSupportingNormal}
-                            descriptionTextStyle={[styles.textNormalThemeText, styles.lineHeightXLarge]}
-                            description={Str.removeSMSDomain(approver.displayName)}
                             icon={icons.UserCheck}
                             shouldBeAccessible={false}
                             tabIndex={-1}
                             iconHeight={20}
                             iconWidth={20}
-                            numberOfLinesDescription={1}
                             iconFill={theme.icon}
                             onPress={onPress}
                             shouldRemoveBackground
                             helperText={getApprovalLimitDescription({approver, currency, translate, personalDetailsByEmail})}
                             helperTextStyle={styles.workflowApprovalLimitText}
                             sentryLabel={CONST.SENTRY_LABEL.WORKSPACE.WORKFLOWS.APPROVAL_SECTION_APPROVER}
+                            titleComponent={renderUserPills([{displayName: approver.displayName, email: approver.email}])}
                         />
                     </View>
                 ))}

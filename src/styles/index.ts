@@ -5420,6 +5420,25 @@ const staticStyles = (theme: ThemeColors) =>
             paddingBottom: 0,
         },
 
+        workflowUserPill: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: theme.border,
+            borderRadius: 999,
+            paddingVertical: 2,
+            paddingHorizontal: 6,
+            marginRight: 6,
+            marginBottom: 6,
+            maxWidth: '100%',
+            minWidth: 0,
+            backgroundColor: theme.componentBG,
+        },
+
+        workflowUserPillText: {
+            maxWidth: 180,
+        },
+
         integrationIcon: {
             overflow: 'hidden',
             borderRadius: variables.buttonBorderRadius,

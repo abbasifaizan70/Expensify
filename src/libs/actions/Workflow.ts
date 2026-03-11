@@ -5,6 +5,7 @@ import * as API from '@libs/API';
 import type {CreateWorkspaceApprovalParams, RemoveWorkspaceApprovalParams, UpdateWorkspaceApprovalParams} from '@libs/API/parameters';
 import {WRITE_COMMANDS} from '@libs/API/types';
 import {getDefaultApprover} from '@libs/PolicyUtils';
+import type {AvatarSource} from '@libs/UserAvatarUtils';
 import {calculateApprovers, convertApprovalWorkflowToPolicyEmployees} from '@libs/WorkflowUtils';
 import CONST from '@src/CONST';
 import type {TranslationPaths} from '@src/languages/types';
@@ -33,6 +34,22 @@ type ClearApprovalWorkflowApproverParams = {
     approverIndex: number;
     currentApprovalWorkflow: ApprovalWorkflowOnyx | undefined;
 };
+
+function getSerializableAvatar(avatar?: AvatarSource) {
+    return typeof avatar === 'string' ? avatar : undefined;
+}
+
+function sanitizeMember(member: Member): Member {
+    return {...member, avatar: getSerializableAvatar(member.avatar)};
+}
+
+function sanitizeApprover(approver: Approver): Approver {
+    return {...approver, avatar: getSerializableAvatar(approver.avatar)};
+}
+
+function sanitizeApproverArray(approvers: Array<Approver | undefined>): Array<Approver | undefined> {
+    return approvers.map((existingApprover) => (existingApprover ? sanitizeApprover(existingApprover) : undefined));
+}
 
 function createApprovalWorkflow({approvalWorkflow, policy, addExpenseApprovalsTaskReport}: CreateApprovalWorkflowParams) {
     if (!policy) {
@@ -220,7 +237,7 @@ function removeApprovalWorkflow(approvalWorkflow: ApprovalWorkflow, policy: Onyx
 
 /** Set the members of the approval workflow that is currently edited */
 function setApprovalWorkflowMembers(members: Member[]) {
-    Onyx.merge(ONYXKEYS.APPROVAL_WORKFLOW, {members, errors: null});
+    Onyx.merge(ONYXKEYS.APPROVAL_WORKFLOW, {members: members.map(sanitizeMember), errors: null});
 }
 
 /**
@@ -235,7 +252,7 @@ function setApprovalWorkflowApprover({approver, approverIndex, currentApprovalWo
     }
 
     const approvers: Array<Approver | undefined> = [...currentApprovalWorkflow.approvers];
-    approvers[approverIndex] = approver;
+    approvers[approverIndex] = sanitizeApprover(approver);
 
     // Check if the approver forwards to other approvers and add them to the list
     if (policy.employeeList[approver.email]?.forwardsTo) {
@@ -273,11 +290,12 @@ function setApprovalWorkflowApprover({approver, approverIndex, currentApprovalWo
 
         return {
             ...existingApprover,
+            avatar: getSerializableAvatar(existingApprover.avatar),
             isCircularReference: hasCircularReference,
         };
     });
 
-    Onyx.merge(ONYXKEYS.APPROVAL_WORKFLOW, {approvers: updatedApprovers, errors});
+    Onyx.merge(ONYXKEYS.APPROVAL_WORKFLOW, {approvers: sanitizeApproverArray(updatedApprovers), errors});
 }
 
 /** Clear one approver at the specified index in the approval workflow that is currently edited */
@@ -303,7 +321,18 @@ function setApprovalWorkflowIsInitialFlow(isInitialFlow: boolean) {
 }
 
 function setApprovalWorkflow(approvalWorkflow: NullishDeep<ApprovalWorkflowOnyx>) {
-    Onyx.set(ONYXKEYS.APPROVAL_WORKFLOW, approvalWorkflow);
+    if (!approvalWorkflow) {
+        Onyx.set(ONYXKEYS.APPROVAL_WORKFLOW, approvalWorkflow);
+        return;
+    }
+
+    Onyx.set(ONYXKEYS.APPROVAL_WORKFLOW, {
+        ...approvalWorkflow,
+        members: approvalWorkflow.members?.map(sanitizeMember),
+        availableMembers: approvalWorkflow.availableMembers?.map(sanitizeMember),
+        originalApprovers: approvalWorkflow.originalApprovers?.map(sanitizeApprover),
+        approvers: approvalWorkflow.approvers ? sanitizeApproverArray(approvalWorkflow.approvers) : approvalWorkflow.approvers,
+    });
 }
 
 function clearApprovalWorkflow() {

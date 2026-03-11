@@ -3,6 +3,7 @@ import lodashMapKeys from 'lodash/mapKeys';
 import type {OnyxEntry} from 'react-native-onyx';
 import type {ValueOf} from 'type-fest';
 import type {LocaleContextProps} from '@components/LocaleContextProvider';
+import type {AvatarSource} from '@libs/UserAvatarUtils';
 import CONST from '@src/CONST';
 import type {BankAccountList} from '@src/types/onyx';
 import type {ApprovalWorkflowOnyx, Approver, Member} from '@src/types/onyx/ApprovalWorkflow';
@@ -26,6 +27,10 @@ const INITIAL_APPROVAL_WORKFLOW: ApprovalWorkflowOnyx = {
     originalApprovers: [],
     isInitialFlow: true,
 };
+
+function getSerializableAvatar(avatar?: AvatarSource) {
+    return typeof avatar === 'string' ? avatar : undefined;
+}
 
 type GetApproversParams = {
     /**
@@ -61,7 +66,7 @@ function calculateApprovers({employees, firstEmail, personalDetailsByEmail}: Get
         approvers.push({
             email: nextEmail,
             forwardsTo: employee.forwardsTo,
-            avatar: personalDetailsByEmail[nextEmail]?.avatar,
+            avatar: getSerializableAvatar(personalDetailsByEmail[nextEmail]?.avatar),
             displayName: personalDetailsByEmail[nextEmail]?.displayName ?? nextEmail,
             isCircularReference,
             approvalLimit: employee.approvalLimit,
@@ -85,7 +90,7 @@ function calculateApprovers({employees, firstEmail, personalDetailsByEmail}: Get
 function buildMemberFromEmployee(employee: PolicyEmployee, personalDetailsByEmail: PersonalDetailsList, email: string): Member {
     return {
         email,
-        avatar: personalDetailsByEmail[email]?.avatar,
+        avatar: getSerializableAvatar(personalDetailsByEmail[email]?.avatar),
         displayName: personalDetailsByEmail[email]?.displayName ?? email,
         pendingFields: employee.pendingFields,
     };
@@ -364,7 +369,7 @@ function updateWorkflowDataOnApproverRemoval({approvalWorkflows, removedApprover
     const defaultWorkflow = approvalWorkflows.find((workflow) => workflow.isDefault);
     const removedApproverEmail = removedApprover.login;
     const ownerEmail = ownerDetails.login;
-    const ownerAvatar = ownerDetails.avatar ?? '';
+    const ownerAvatar = getSerializableAvatar(ownerDetails.avatar) ?? '';
     const ownerDisplayName = ownerDetails.displayName ?? '';
 
     return approvalWorkflows.flatMap((workflow) => {
