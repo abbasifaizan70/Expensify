@@ -5439,6 +5439,25 @@ const staticStyles = (theme: ThemeColors) =>
             maxWidth: 180,
         },
 
+        attendeePill: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: theme.border,
+            borderRadius: 999,
+            paddingVertical: 2,
+            paddingHorizontal: 6,
+            marginRight: 6,
+            marginBottom: 6,
+            maxWidth: '100%',
+            minWidth: 0,
+            backgroundColor: theme.componentBG,
+        },
+
+        attendeePillText: {
+            maxWidth: 120,
+        },
+
         integrationIcon: {
             overflow: 'hidden',
             borderRadius: variables.buttonBorderRadius,

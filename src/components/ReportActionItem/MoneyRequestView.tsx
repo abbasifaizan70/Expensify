@@ -4,6 +4,7 @@ import {View} from 'react-native';
 import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
 import type {ValueOf} from 'type-fest';
 import DotIndicatorMessage from '@components/DotIndicatorMessage';
+import Avatar from '@components/Avatar';
 import Icon from '@components/Icon';
 import MenuItem from '@components/MenuItem';
 import MenuItemWithTopDescription from '@components/MenuItemWithTopDescription';
@@ -13,6 +14,7 @@ import ReportActionsSkeletonView from '@components/ReportActionsSkeletonView';
 import {useSearchStateContext} from '@components/Search/SearchContext';
 import Switch from '@components/Switch';
 import Text from '@components/Text';
+import Tooltip from '@components/Tooltip';
 import ViolationMessages from '@components/ViolationMessages';
 import {useWideRHPState} from '@components/WideRHPContextProvider';
 import useActiveRoute from '@hooks/useActiveRoute';
@@ -157,6 +159,10 @@ const perDiemPoliciesSelector = (policies: OnyxCollection<OnyxTypes.Policy>) => 
         }),
     );
 };
+
+const MAX_ATTENDEE_ROWS = 2;
+const ATTENDEE_PILL_GAP = 6;
+const ATTENDEE_MORE_PILL_KEY = '__attendees_more__';
 
 function MoneyRequestView({
     transactionThreadReport,
@@ -687,6 +693,8 @@ function MoneyRequestView({
     const [previousTransactionTag, setPreviousTransactionTag] = useState(transactionTag);
     const [previousTag, setPreviousTag] = useState<string | undefined>(undefined);
     const [currentTransactionTag, setCurrentTransactionTag] = useState<string | undefined>(undefined);
+    const [attendeePillsContainerWidth, setAttendeePillsContainerWidth] = useState(0);
+    const [attendeePillWidths, setAttendeePillWidths] = useState<Record<string, number>>({});
     if (transactionTag !== previousTransactionTag) {
         setPreviousTransactionTag(transactionTag);
         setPreviousTag(previousTransactionTag);
@@ -697,6 +705,157 @@ function MoneyRequestView({
 
     const getAttendeesTitle = Array.isArray(actualAttendees) ? actualAttendees.map((item) => item?.displayName ?? item?.login).join(', ') : '';
     const attendeesCopyValue = !canEdit ? getAttendeesTitle : undefined;
+
+    const attendeePillEntries = useMemo(
+        () =>
+            (Array.isArray(actualAttendees) ? actualAttendees : []).map((attendee, index) => ({
+                key: `${attendee.accountID ?? attendee.email ?? attendee.displayName}-${index}`,
+                name: attendee.displayName ?? attendee.login ?? '',
+                avatar: attendee.avatarUrl,
+                accountID: attendee.accountID,
+            })),
+        [actualAttendees],
+    );
+
+    const calculateFittablePills = useCallback(
+        (pillWidths: number[]) => {
+            if (attendeePillsContainerWidth <= 0) {
+                return pillWidths.length;
+            }
+
+            let currentRowWidth = 0;
+            let currentRow = 1;
+            let count = 0;
+
+            for (const width of pillWidths) {
+                const clampedWidth = Math.min(width, attendeePillsContainerWidth);
+                const nextWidth = currentRowWidth === 0 ? clampedWidth : currentRowWidth + ATTENDEE_PILL_GAP + clampedWidth;
+
+                if (nextWidth > attendeePillsContainerWidth) {
+                    currentRow += 1;
+                    if (currentRow > MAX_ATTENDEE_ROWS) {
+                        break;
+                    }
+                    currentRowWidth = clampedWidth;
+                    count += 1;
+                    continue;
+                }
+
+                currentRowWidth = nextWidth;
+                count += 1;
+            }
+
+            return count;
+        },
+        [attendeePillsContainerWidth],
+    );
+
+    const {visibleAttendeePills, hiddenAttendeeCount, hiddenAttendeeTooltip} = useMemo(() => {
+        if (attendeePillEntries.length === 0) {
+            return {visibleAttendeePills: attendeePillEntries, hiddenAttendeeCount: 0, hiddenAttendeeTooltip: ''};
+        }
+
+        const estimatedWidth = attendeePillsContainerWidth > 0 ? attendeePillsContainerWidth : 240;
+        const attendeeWidths = attendeePillEntries.map((entry) => {
+            const estimatedPillWidth = Math.min(estimatedWidth, 36 + Math.min(entry.name.length, 18) * 7);
+            return attendeePillWidths[entry.key] ?? estimatedPillWidth;
+        });
+
+        let visibleCount = calculateFittablePills(attendeeWidths);
+        if (visibleCount >= attendeePillEntries.length) {
+            return {visibleAttendeePills: attendeePillEntries, hiddenAttendeeCount: 0, hiddenAttendeeTooltip: ''};
+        }
+
+        while (visibleCount > 0) {
+            const hiddenCount = attendeePillEntries.length - visibleCount;
+            const estimatedMoreWidth = 56 + String(hiddenCount).length * 8;
+            const moreWidth = attendeePillWidths[ATTENDEE_MORE_PILL_KEY] ?? estimatedMoreWidth;
+            const fitWithMorePill = calculateFittablePills([...attendeeWidths.slice(0, visibleCount), moreWidth]);
+            if (fitWithMorePill === visibleCount + 1) {
+                break;
+            }
+            visibleCount -= 1;
+        }
+
+        const hiddenAttendees = attendeePillEntries.slice(visibleCount);
+
+        return {
+            visibleAttendeePills: attendeePillEntries.slice(0, visibleCount),
+            hiddenAttendeeCount: hiddenAttendees.length,
+            hiddenAttendeeTooltip: hiddenAttendees.map((attendee) => attendee.name).join(', '),
+        };
+    }, [attendeePillEntries, attendeePillWidths, attendeePillsContainerWidth, calculateFittablePills]);
+
+    const attendeesTitleComponent = useMemo(() => {
+        if (attendeePillEntries.length === 0) {
+            return undefined;
+        }
+
+        return (
+            <View
+                style={[styles.flexRow, styles.flexWrap, styles.mt1]}
+                onLayout={({nativeEvent}) => {
+                    const {width} = nativeEvent.layout;
+                    if (width === attendeePillsContainerWidth) {
+                        return;
+                    }
+                    setAttendeePillsContainerWidth(width);
+                }}
+            >
+                {visibleAttendeePills.map((attendee) => (
+                    <View
+                        key={attendee.key}
+                        style={styles.attendeePill}
+                        onLayout={({nativeEvent}) => {
+                            const width = Math.ceil(nativeEvent.layout.width);
+                            setAttendeePillWidths((currentWidths) => {
+                                if (currentWidths[attendee.key] === width) {
+                                    return currentWidths;
+                                }
+                                return {...currentWidths, [attendee.key]: width};
+                            });
+                        }}
+                    >
+                        <Avatar
+                            size={CONST.AVATAR_SIZE.SMALL}
+                            source={attendee.avatar}
+                            name={attendee.name}
+                            type={CONST.ICON_TYPE_AVATAR}
+                            avatarID={attendee.accountID}
+                        />
+                        <Text
+                            style={[styles.textLabelSupporting, styles.ml2, styles.flexShrink1, styles.attendeePillText]}
+                            numberOfLines={1}
+                        >
+                            {attendee.name}
+                        </Text>
+                    </View>
+                ))}
+                {hiddenAttendeeCount > 0 && (
+                    <Tooltip text={hiddenAttendeeTooltip}>
+                        <View
+                            style={styles.attendeePill}
+                            onLayout={({nativeEvent}) => {
+                                const width = Math.ceil(nativeEvent.layout.width);
+                                setAttendeePillWidths((currentWidths) => {
+                                    if (currentWidths[ATTENDEE_MORE_PILL_KEY] === width) {
+                                        return currentWidths;
+                                    }
+                                    return {...currentWidths, [ATTENDEE_MORE_PILL_KEY]: width};
+                                });
+                            }}
+                        >
+                            <Text style={[styles.textLabelSupporting, styles.textStrong]}>{`+${hiddenAttendeeCount} ${translate('common.more').toLowerCase()}`}</Text>
+                        </View>
+                    </Tooltip>
+                )}
+            </View>
+        );
+    }, [attendeePillEntries.length, attendeePillsContainerWidth, hiddenAttendeeCount, hiddenAttendeeTooltip, styles, translate, visibleAttendeePills]);
+
+    const openAttendeeSelector = useCallback(() => {
+        Navigation.navigate(ROUTES.MONEY_REQUEST_ATTENDEE.getRoute(CONST.IOU.ACTION.EDIT, iouType, transaction.transactionID, transactionThreadReport?.reportID));
+    }, [iouType, transaction.transactionID, transactionThreadReport?.reportID]);
 
     const tagList = policyTagLists.map(({name, orderWeight, tags}, index) => {
         const tagForDisplay = getTagForDisplay(updatedTransaction ?? transaction, index);
@@ -1066,7 +1225,8 @@ function MoneyRequestView({
                     <OfflineWithFeedback pendingAction={getPendingFieldAction('attendees')}>
                         <MenuItemWithTopDescription
                             key="attendees"
-                            title={getAttendeesTitle}
+                            title={canEdit ? undefined : getAttendeesTitle}
+                            titleComponent={canEdit ? attendeesTitleComponent : undefined}
                             description={`${translate('iou.attendees')} ${
                                 Array.isArray(actualAttendees) && actualAttendees.length > 1 && formattedPerAttendeeAmount
                                     ? `${CONST.DOT_SEPARATOR} ${formattedPerAttendeeAmount} ${translate('common.perPerson')}`
@@ -1074,14 +1234,11 @@ function MoneyRequestView({
                             }`}
                             style={[styles.moneyRequestMenuItem]}
                             titleStyle={styles.flex1}
-                            onPress={() => {
-                                Navigation.navigate(ROUTES.MONEY_REQUEST_ATTENDEE.getRoute(CONST.IOU.ACTION.EDIT, iouType, transaction.transactionID, transactionThreadReport?.reportID));
-                            }}
+                            onPress={openAttendeeSelector}
                             brickRoadIndicator={getErrorForField('attendees') ? CONST.BRICK_ROAD_INDICATOR_STATUS.ERROR : undefined}
                             errorText={getErrorForField('attendees')}
                             interactive={canEdit}
                             shouldShowRightIcon={canEdit}
-                            shouldRenderAsHTML
                             copyValue={attendeesCopyValue}
                             copyable={!!attendeesCopyValue}
                         />
