@@ -137,6 +137,9 @@ type SplitExpense = {
     /** Amount allocated to this split */
     amount: number;
 
+    /** User-entered percentage (used for display when amount rounds to 0 in split-by-percentage mode) */
+    percentage?: number;
+
     /** Description of this split */
     description?: string;
 

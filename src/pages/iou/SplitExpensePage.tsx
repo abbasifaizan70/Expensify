@@ -315,7 +315,7 @@ function SplitExpensePage({route}: SplitExpensePageProps) {
             updateSplitExpenseAmountField(draftTransaction, id, amountInCents, currentPolicy);
         } else {
             const amountInCents = calculateSplitAmountFromPercentage(transactionDetailsAmount, value);
-            updateSplitExpenseAmountField(draftTransaction, id, amountInCents, currentPolicy);
+            updateSplitExpenseAmountField(draftTransaction, id, amountInCents, currentPolicy, value);
         }
     };
 
@@ -335,7 +335,8 @@ function SplitExpensePage({route}: SplitExpensePageProps) {
         const isApproved = isReportApproved({report: currentItemReport});
         const isSettled = isSettledReportUtils(currentItemReport?.reportID);
         const isCancelled = currentItemReport && currentItemReport?.isCancelledIOU;
-        const percentage = adjustedPercentages.at(index) ?? 0;
+        const amountDerivedPercentage = adjustedPercentages.at(index) ?? 0;
+        const percentage = item.percentage ?? amountDerivedPercentage;
 
         const date = DateUtils.formatWithUTCTimeZone(
             item.created,

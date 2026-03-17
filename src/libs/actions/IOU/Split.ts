@@ -2393,7 +2393,13 @@ function updateSplitExpenseField(
     });
 }
 
-function updateSplitExpenseAmountField(draftTransaction: OnyxEntry<OnyxTypes.Transaction>, currentItemTransactionID: string, amount: number, policy?: OnyxEntry<OnyxTypes.Policy>) {
+function updateSplitExpenseAmountField(
+    draftTransaction: OnyxEntry<OnyxTypes.Transaction>,
+    currentItemTransactionID: string,
+    amount: number,
+    policy?: OnyxEntry<OnyxTypes.Policy>,
+    percentage?: number,
+) {
     if (!draftTransaction?.transactionID || !currentItemTransactionID || Number.isNaN(amount)) {
         return;
     }
@@ -2412,6 +2418,7 @@ function updateSplitExpenseAmountField(draftTransaction: OnyxEntry<OnyxTypes.Tra
                 ...splitExpense,
                 amount,
                 isManuallyEdited: true,
+                percentage,
             };
 
             // Update distance for distance transactions based on new amount and rate
