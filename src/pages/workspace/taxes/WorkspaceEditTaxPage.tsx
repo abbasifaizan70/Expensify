@@ -10,6 +10,7 @@ import Switch from '@components/Switch';
 import Text from '@components/Text';
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
+import usePolicyData from '@hooks/usePolicyData';
 import useThemeStyles from '@hooks/useThemeStyles';
 import {clearTaxRateFieldError, deletePolicyTaxes, setPolicyTaxesEnabled} from '@libs/actions/TaxRate';
 import {getLatestErrorField} from '@libs/ErrorUtils';
@@ -35,6 +36,7 @@ function WorkspaceEditTaxPage({
 }: WorkspaceEditTaxPageBaseProps) {
     const styles = useThemeStyles();
     const {translate, localeCompare} = useLocalize();
+    const policyData = usePolicyData(policyID);
     const currentTaxID = getCurrentTaxID(policy, taxID);
     const currentTaxRate = currentTaxID && policy?.taxRates?.taxes?.[currentTaxID];
     const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
@@ -61,7 +63,7 @@ function WorkspaceEditTaxPage({
         if (!policyID) {
             return;
         }
-        deletePolicyTaxes(policy, [taxID], localeCompare);
+        deletePolicyTaxes(policyData, [taxID], localeCompare);
         setIsDeleteModalVisible(false);
         Navigation.goBack();
     };

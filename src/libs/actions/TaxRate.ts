@@ -2,6 +2,7 @@ import type {NullishDeep, OnyxEntry} from 'react-native-onyx';
 import Onyx from 'react-native-onyx';
 import type {FormOnyxValues} from '@components/Form/types';
 import type {LocaleContextProps, LocalizedTranslate} from '@components/LocaleContextProvider';
+import type PolicyData from '@hooks/usePolicyData/types';
 import * as API from '@libs/API';
 import type {
     CreatePolicyTaxParams,
@@ -13,6 +14,7 @@ import type {
 } from '@libs/API/parameters';
 import {WRITE_COMMANDS} from '@libs/API/types';
 import {getDistanceRateCustomUnit} from '@libs/PolicyUtils';
+import {pushTransactionViolationsOnyxData} from '@libs/ReportUtils';
 import {getFieldRequiredErrors, isExistingTaxCode, isExistingTaxName, isValidPercentage} from '@libs/ValidationUtils';
 import CONST from '@src/CONST';
 import {getMicroSecondOnyxErrorWithTranslationKey} from '@src/libs/ErrorUtils';
@@ -282,7 +284,8 @@ type TaxRateDeleteMap = Record<
     | null
 >;
 
-function deletePolicyTaxes(policy: OnyxEntry<Policy>, taxesToDelete: string[], localeCompare: LocaleContextProps['localeCompare']) {
+function deletePolicyTaxes(policyData: PolicyData, taxesToDelete: string[], localeCompare: LocaleContextProps['localeCompare']) {
+    const policy = policyData.policy;
     const policyTaxRates = policy?.taxRates?.taxes;
     const foreignTaxDefault = policy?.taxRates?.foreignTaxDefault;
     const firstTaxID = Object.keys(policyTaxRates ?? {})
@@ -328,7 +331,7 @@ function deletePolicyTaxes(policy: OnyxEntry<Policy>, taxesToDelete: string[], l
         };
     }
 
-    const onyxData: OnyxData<typeof ONYXKEYS.COLLECTION.POLICY> = {
+    const onyxData: OnyxData<typeof ONYXKEYS.COLLECTION.POLICY | typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS> = {
         optimisticData: [
             {
                 onyxMethod: Onyx.METHOD.MERGE,
@@ -401,6 +404,14 @@ function deletePolicyTaxes(policy: OnyxEntry<Policy>, taxesToDelete: string[], l
             },
         ],
     };
+
+    const optimisticTaxes = Object.fromEntries(Object.entries(policyTaxRates).filter(([taxID]) => !taxesToDelete.includes(taxID)));
+    pushTransactionViolationsOnyxData(onyxData, policyData, {
+        taxRates: {
+            ...policy?.taxRates,
+            taxes: optimisticTaxes,
+        },
+    });
 
     const parameters = {
         policyID: policy.id,
