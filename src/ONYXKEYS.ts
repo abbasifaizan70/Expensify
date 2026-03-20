@@ -809,6 +809,12 @@ const ONYXKEYS = {
          * Key format: passkey_${userId}
          */
         PASSKEY_CREDENTIALS: 'passkeyCredentials_',
+
+        /**
+         * Persisted list of server-known MFA public key IDs per account.
+         * Key format: multifactorAuthenticationPublicKeyIDs_${accountID}
+         */
+        MULTIFACTOR_AUTHENTICATION_PUBLIC_KEY_IDS: 'multifactorAuthenticationPublicKeyIDs_',
     },
 
     /** List of Form ids */
@@ -1243,6 +1249,7 @@ type OnyxCollectionValuesMapping = {
     [ONYXKEYS.COLLECTION.DOMAIN_ERRORS]: OnyxTypes.DomainErrors;
     [ONYXKEYS.COLLECTION.CODING_RULE_MATCHING_TRANSACTION]: OnyxTypes.CodingRuleMatchingTransaction;
     [ONYXKEYS.COLLECTION.PASSKEY_CREDENTIALS]: OnyxTypes.LocalPasskeyCredentialsEntry;
+    [ONYXKEYS.COLLECTION.MULTIFACTOR_AUTHENTICATION_PUBLIC_KEY_IDS]: string[];
 };
 
 type OnyxValuesMapping = {

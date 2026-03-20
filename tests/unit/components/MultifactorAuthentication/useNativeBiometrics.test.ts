@@ -22,11 +22,24 @@ jest.mock('@hooks/useLocalize', () => ({
 }));
 
 let mockMultifactorAuthenticationPublicKeyIDs: string[] | undefined = [];
+let mockPersistedCredentialIDs: string[] | undefined;
+const mockAccountOnyxKey = 'account';
+const mockPersistedMFAKeyIDsOnyxKey = 'multifactorAuthenticationPublicKeyIDs_12345';
 
 jest.mock('@hooks/useOnyx', () => ({
     // eslint-disable-next-line @typescript-eslint/naming-convention
     __esModule: true,
-    default: () => [mockMultifactorAuthenticationPublicKeyIDs],
+    default: (key: string) => {
+        if (key === mockAccountOnyxKey) {
+            return [mockMultifactorAuthenticationPublicKeyIDs];
+        }
+
+        if (key === mockPersistedMFAKeyIDsOnyxKey) {
+            return [mockPersistedCredentialIDs];
+        }
+
+        return [undefined];
+    },
 }));
 
 jest.mock('@userActions/MultifactorAuthentication');
@@ -68,6 +81,7 @@ describe('useNativeBiometrics hook', () => {
         jest.clearAllMocks();
         // Reset the Onyx mock
         mockMultifactorAuthenticationPublicKeyIDs = [];
+        mockPersistedCredentialIDs = undefined;
         // Reset PublicKeyStore.supportedAuthentication to default
         Object.defineProperty(PublicKeyStore, 'supportedAuthentication', {
             value: {biometrics: true, deviceCredentials: true},
@@ -173,6 +187,14 @@ describe('useNativeBiometrics hook', () => {
             expect(result.current.serverKnownCredentialIDs).toEqual(['key-1', 'key-2']);
         });
 
+        it('should fall back to persisted credential IDs when account state is cleared', () => {
+            mockMultifactorAuthenticationPublicKeyIDs = undefined;
+            mockPersistedCredentialIDs = ['persisted-key-1', 'persisted-key-2'];
+            const {result} = renderHook(() => useNativeBiometrics());
+
+            expect(result.current.serverKnownCredentialIDs).toEqual(['persisted-key-1', 'persisted-key-2']);
+        });
+
         it('should return empty array when Onyx state is empty', () => {
             mockMultifactorAuthenticationPublicKeyIDs = [];
             const {result} = renderHook(() => useNativeBiometrics());
@@ -184,6 +206,7 @@ describe('useNativeBiometrics hook', () => {
     describe('haveCredentialsEverBeenConfigured', () => {
         it('should return false when Onyx state is undefined', () => {
             mockMultifactorAuthenticationPublicKeyIDs = undefined;
+            mockPersistedCredentialIDs = undefined;
             const {result} = renderHook(() => useNativeBiometrics());
 
             expect(result.current.haveCredentialsEverBeenConfigured).toBe(false);
@@ -198,6 +221,14 @@ describe('useNativeBiometrics hook', () => {
 
         it('should return true when Onyx state has credential IDs', () => {
             mockMultifactorAuthenticationPublicKeyIDs = ['key-1'];
+            const {result} = renderHook(() => useNativeBiometrics());
+
+            expect(result.current.haveCredentialsEverBeenConfigured).toBe(true);
+        });
+
+        it('should return true when persisted credential IDs exist', () => {
+            mockMultifactorAuthenticationPublicKeyIDs = undefined;
+            mockPersistedCredentialIDs = ['persisted-key-1'];
             const {result} = renderHook(() => useNativeBiometrics());
 
             expect(result.current.haveCredentialsEverBeenConfigured).toBe(true);

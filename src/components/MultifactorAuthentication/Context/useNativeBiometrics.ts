@@ -1,5 +1,6 @@
-import {useCallback, useMemo} from 'react';
+import {useCallback, useEffect, useMemo} from 'react';
 import type {OnyxEntry} from 'react-native-onyx';
+import Onyx from 'react-native-onyx';
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
@@ -96,8 +97,20 @@ function useNativeBiometrics(): UseNativeBiometricsReturn {
     const {translate} = useLocalize();
 
     const [multifactorAuthenticationPublicKeyIDs] = useOnyx(ONYXKEYS.ACCOUNT, {selector: getMultifactorAuthenticationPublicKeyIDs});
-    const serverKnownCredentialIDs = useMemo(() => multifactorAuthenticationPublicKeyIDs ?? [], [multifactorAuthenticationPublicKeyIDs]);
-    const haveCredentialsEverBeenConfigured = multifactorAuthenticationPublicKeyIDs !== undefined;
+    const persistedCredentialIDsOnyxKey = `${ONYXKEYS.COLLECTION.MULTIFACTOR_AUTHENTICATION_PUBLIC_KEY_IDS}${accountID}`;
+    const [persistedCredentialIDs] = useOnyx(persistedCredentialIDsOnyxKey);
+
+    const serverKnownCredentialIDs = useMemo(() => multifactorAuthenticationPublicKeyIDs ?? persistedCredentialIDs ?? [], [multifactorAuthenticationPublicKeyIDs, persistedCredentialIDs]);
+    const haveCredentialsEverBeenConfigured = multifactorAuthenticationPublicKeyIDs !== undefined || persistedCredentialIDs !== undefined;
+
+    // Keep an account-scoped local copy so known credential IDs survive logout/Onyx clears.
+    useEffect(() => {
+        if (!accountID || multifactorAuthenticationPublicKeyIDs === undefined) {
+            return;
+        }
+
+        Onyx.set(persistedCredentialIDsOnyxKey, multifactorAuthenticationPublicKeyIDs);
+    }, [accountID, multifactorAuthenticationPublicKeyIDs, persistedCredentialIDsOnyxKey]);
 
     /**
      * Checks if the device supports biometric authentication methods.
