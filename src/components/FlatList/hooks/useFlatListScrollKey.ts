@@ -115,6 +115,16 @@ export default function useFlatListScrollKey<T>({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    useEffect(() => {
+        if (!isLoadingData) {
+            return;
+        }
+        // If we are loading data (i.e. there are newer messages to show), and the FlatList
+        // doesn't trigger onStartReached (e.g. because the content doesn't fill the screen),
+        // we need to manually trigger it so the newer messages are progressively rendered.
+        handleStartReached({distanceFromStart: 0});
+    }, [isLoadingData, displayedData.length, handleStartReached]);
+
     const [shouldPreserveVisibleContentPosition, setShouldPreserveVisibleContentPosition] = useState(true);
     const maintainVisibleContentPosition = useMemo(() => {
         if ((!initialScrollKey && (!isInitialData || !isQueueRendering)) || !shouldPreserveVisibleContentPosition) {

@@ -102,7 +102,7 @@ describe('PaginationUtils', () => {
             expect(result.hasNextPage).toBe(false);
         });
 
-        it('given an input ID of an action in a gap it will return only that action', () => {
+        it('given an input ID of an action in a gap it will return only that action but allow loading newer and older from full list', () => {
             const input = createItems([
                 // Given these sortedItems
                 '17',
@@ -137,8 +137,8 @@ describe('PaginationUtils', () => {
             ]);
             const result = PaginationUtils.getContinuousChain(input, pages, getID, '8');
             expect(result.data).toStrictEqual(expectedResult);
-            expect(result.hasPreviousPage).toBe(false);
-            expect(result.hasNextPage).toBe(false);
+            expect(result.hasPreviousPage).toBe(true);
+            expect(result.hasNextPage).toBe(true);
         });
 
         it('given an empty input ID and the report only contains pending actions, it will return all actions', () => {

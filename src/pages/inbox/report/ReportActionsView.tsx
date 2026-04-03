@@ -301,7 +301,45 @@ function ReportActionsView({reportID, onLayout}: ReportActionsViewProps) {
         transactionThreadReport,
         hasOlderActions,
         hasNewerActions,
+        newestFetchedReportActionID: reportMetadata?.newestFetchedReportActionID,
     });
+
+    // After the initial OpenReport API call completes, automatically fetch any newer actions
+    // that may exist beyond the loaded page. This is essential for deep links: the backend
+    // returns actions centered on the linked reportAction (often only older actions), so
+    // newer system messages (e.g. CARD_ISSUED_VIRTUAL) won't be in the initial page.
+    // Without this, users must switch away and back before those newer messages appear.
+    const autoFetchNewerAttemptsRef = useRef(0);
+    const prevDeepLinkFetchKeyRef = useRef(`${reportID ?? ''}:${reportActionID ?? ''}`);
+    const currentDeepLinkFetchKey = `${reportID ?? ''}:${reportActionID ?? ''}`;
+    if (prevDeepLinkFetchKeyRef.current !== currentDeepLinkFetchKey) {
+        prevDeepLinkFetchKeyRef.current = currentDeepLinkFetchKey;
+        autoFetchNewerAttemptsRef.current = 0;
+    }
+    const hasFinishedInitialReportActionsLoad = reportMetadata?.isLoadingInitialReportActions === false;
+    useEffect(() => {
+        if (!hasFinishedInitialReportActionsLoad || reportActions.length === 0 || isOffline || reportMetadata?.isLoadingNewerReportActions) {
+            return;
+        }
+
+        const isDeepLinkedReport = !!reportActionID;
+        const maxAttempts = isDeepLinkedReport ? 2 : 1;
+        const shouldAttemptFetch = (isDeepLinkedReport || hasNewerActions) && autoFetchNewerAttemptsRef.current < maxAttempts;
+        if (!shouldAttemptFetch) {
+            return;
+        }
+
+        autoFetchNewerAttemptsRef.current += 1;
+        loadNewerChats(true);
+    }, [
+        hasFinishedInitialReportActionsLoad,
+        reportActionID,
+        hasNewerActions,
+        isOffline,
+        loadNewerChats,
+        reportActions.length,
+        reportMetadata?.isLoadingNewerReportActions,
+    ]);
 
     const {
         filteredVisibleActions: conciergeSidePanelFilteredVisibleActions,

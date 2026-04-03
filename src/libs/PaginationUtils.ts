@@ -222,9 +222,16 @@ function getContinuousChain<TResource>(sortedItems: TResource[], pages: Pages, g
 
         const linkedPage = pagesWithIndexes.find((pageIndex) => index >= pageIndex.firstIndex && index <= pageIndex.lastIndex);
 
-        // If we are linked to an action in a gap return it by itself
+        // If we are linked to an action in a gap return it by itself, but preserve pagination toward newer/older
+        // items that already exist in `sortedItems` so callers can fetch adjacent pages (e.g. system messages
+        // added after a deep-linked report preview).
         if (!linkedPage && resourceItem) {
-            return {data: [resourceItem.item], hasNextPage: false, hasPreviousPage: false, resourceItem};
+            return {
+                data: [resourceItem.item],
+                hasNextPage: index < sortedItems.length - 1,
+                hasPreviousPage: index > 0,
+                resourceItem,
+            };
         }
 
         if (linkedPage) {
