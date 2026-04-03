@@ -68,7 +68,7 @@ function UserInfoAndActionButtonRow({
                     shouldUseArrowIcon={false}
                 />
             )}
-            <View style={[{width: isLargeScreenWidth ? variables.w80 : variables.w72}, styles.alignItemsEnd]}>
+            <View style={[{width: isLargeScreenWidth ? variables.w80 : variables.w72}, styles.alignItemsEnd, !isLargeScreenWidth && isInMobileSelectionMode && styles.zIndex10]}>
                 <ActionCell
                     action={item.action}
                     goToItem={handleActionButtonPress}
@@ -79,7 +79,7 @@ function UserInfoAndActionButtonRow({
                     hash={item.hash}
                     amount={(item as TransactionListItemType)?.amount ?? (item as TransactionReportGroupListItemType)?.total}
                     extraSmall={!isLargeScreenWidth}
-                    shouldDisablePointerEvents={isInMobileSelectionMode || isDisabledItem}
+                    shouldDisablePointerEvents={isDisabledItem || (isInMobileSelectionMode && !item.isSelected)}
                 />
             </View>
         </View>

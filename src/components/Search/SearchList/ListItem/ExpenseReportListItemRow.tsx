@@ -252,6 +252,8 @@ function ExpenseReportListItemRow({
                     accessible
                     accessibilityLabel={groupAccessibilityLabel}
                     role={CONST.ROLE.BUTTON}
+                    // Let touches reach the absolutely positioned action column on iOS; children still receive hits.
+                    pointerEvents={isInMobileSelectionMode ? 'box-none' : 'auto'}
                     style={{marginRight: variables.w72}}
                 >
                     <View style={[styles.pt0, styles.flexRow, styles.alignItemsCenter, styles.gap2, styles.mb2]}>
@@ -304,7 +306,7 @@ function ExpenseReportListItemRow({
                         </View>
                     </View>
                 </View>
-                <View style={[styles.pAbsolute, styles.t0, styles.r0, {width: variables.w72}, styles.alignItemsEnd]}>
+                <View style={[styles.pAbsolute, styles.t0, styles.r0, styles.zIndex10, {width: variables.w72}, styles.alignItemsEnd]}>
                     <ActionCell
                         action={item.action}
                         goToItem={onButtonPress}
@@ -315,7 +317,7 @@ function ExpenseReportListItemRow({
                         hash={item.hash}
                         amount={item.total}
                         extraSmall
-                        shouldDisablePointerEvents={isInMobileSelectionMode || isPendingDelete}
+                        shouldDisablePointerEvents={isPendingDelete || (isInMobileSelectionMode && !item.isSelected)}
                     />
                 </View>
             </View>
