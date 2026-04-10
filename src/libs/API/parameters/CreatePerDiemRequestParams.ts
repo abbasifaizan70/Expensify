@@ -24,6 +24,7 @@ type CreatePerDiemRequestParams = {
     reimbursable?: boolean;
     attendees?: string;
     customUnitPolicyID?: string;
+    actionableWhisperReportActionID?: string;
 
     /** When true, the backend defers auto-submit so batch expense creation (e.g. duplicate report) can finish before the report is submitted */
     shouldDeferAutoSubmit?: boolean;

@@ -636,6 +636,7 @@ function IOURequestStepConfirmation({
                 });
             } else {
                 submitPerDiemExpenseIOUActions({
+                    action,
                     report,
                     participantParams: {
                         payeeEmail: currentUserPersonalDetails.login,
@@ -663,6 +664,9 @@ function IOURequestStepConfirmation({
                         reimbursable: transaction.reimbursable,
                         attendees: transaction.comment?.attendees,
                         isFromGlobalCreate: transaction.isFromFloatingActionButton ?? transaction.isFromGlobalCreate,
+                        actionableWhisperReportActionID: transaction.actionableWhisperReportActionID,
+                        linkedTrackedExpenseReportAction: transaction.linkedTrackedExpenseReportAction,
+                        linkedTrackedExpenseReportID: transaction.linkedTrackedExpenseReportID,
                     },
                     isASAPSubmitBetaEnabled,
                     currentUserAccountIDParam: currentUserPersonalDetails.accountID,
@@ -678,6 +682,7 @@ function IOURequestStepConfirmation({
         [
             transaction,
             iouType,
+            action,
             selfDMReport,
             policy,
             currentUserPersonalDetails.accountID,

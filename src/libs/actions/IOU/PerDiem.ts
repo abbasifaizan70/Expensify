@@ -41,7 +41,7 @@ import {buildOptimisticTransaction} from '@libs/TransactionUtils';
 import {buildOptimisticPolicyRecentlyUsedTags} from '@userActions/Policy/Tag';
 import {notifyNewAction} from '@userActions/Report';
 import {removeDraftTransaction} from '@userActions/TransactionEdit';
-import CONST from '@src/CONST';
+import CONST, {type IOUAction} from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type * as OnyxTypes from '@src/types/onyx';
 import type {Attendee, Participant} from '@src/types/onyx/IOU';
@@ -64,6 +64,7 @@ import {
     mergePolicyRecentlyUsedCurrencies,
 } from '.';
 import type {BaseTransactionParams, MoneyRequestInformation, RequestMoneyParticipantParams} from './index';
+import {getDeleteTrackExpenseInformation} from './TrackExpense';
 import type BasePolicyParams from './types/BasePolicyParams';
 
 function removeSubrate(transaction: OnyxEntry<OnyxTypes.Transaction>, currentIndex: string) {
@@ -210,6 +211,9 @@ type PerDiemExpenseTransactionParams = Omit<BaseTransactionParams, 'amount' | 'm
     attendees?: Attendee[];
     customUnit: TransactionCustomUnit;
     comment?: string;
+    actionableWhisperReportActionID?: string;
+    linkedTrackedExpenseReportAction?: OnyxTypes.ReportAction;
+    linkedTrackedExpenseReportID?: string;
 };
 
 type RecentlyUsedParams = {
@@ -217,6 +221,7 @@ type RecentlyUsedParams = {
 };
 
 type PerDiemExpenseInformation = {
+    action?: IOUAction;
     report: OnyxEntry<OnyxTypes.Report>;
     participantParams: RequestMoneyParticipantParams;
     policyParams?: BasePolicyParams;
@@ -875,6 +880,7 @@ function getPerDiemExpenseInformationForSelfDM(perDiemExpenseInformation: PerDie
  */
 function submitPerDiemExpense(submitPerDiemExpenseInformation: PerDiemExpenseInformation) {
     const {
+        action,
         report,
         participantParams,
         policyParams = {},
@@ -896,7 +902,8 @@ function submitPerDiemExpense(submitPerDiemExpenseInformation: PerDiemExpenseInf
         shouldDeferAutoSubmit,
     } = submitPerDiemExpenseInformation;
     const {payeeAccountID} = participantParams;
-    const {currency, comment = '', category, tag, created, customUnit, attendees, isFromGlobalCreate} = transactionParams;
+    const {currency, comment = '', category, tag, created, customUnit, attendees, isFromGlobalCreate, actionableWhisperReportActionID, linkedTrackedExpenseReportAction, linkedTrackedExpenseReportID} =
+        transactionParams;
 
     if (
         isEmptyObject(policyParams.policy) ||
@@ -982,7 +989,27 @@ function submitPerDiemExpense(submitPerDiemExpenseInformation: PerDiemExpenseInf
         attendees: attendees ? JSON.stringify(attendees) : undefined,
         customUnitPolicyID,
         shouldDeferAutoSubmit,
+        actionableWhisperReportActionID,
     };
+
+    if (action === CONST.IOU.ACTION.SUBMIT && linkedTrackedExpenseReportAction && linkedTrackedExpenseReportID) {
+        const linkedTrackedExpenseReport = getAllReports()?.[`${ONYXKEYS.COLLECTION.REPORT}${linkedTrackedExpenseReportID}`];
+        const linkedReportCleanupData = getDeleteTrackExpenseInformation(
+            linkedTrackedExpenseReport,
+            transaction.transactionID,
+            linkedTrackedExpenseReportAction,
+            false,
+            false,
+            true,
+            actionableWhisperReportActionID,
+            CONST.IOU.ACTION.SUBMIT,
+            true,
+        );
+
+        onyxData.optimisticData?.push(...linkedReportCleanupData.optimisticData);
+        onyxData.successData?.push(...linkedReportCleanupData.successData);
+        onyxData.failureData?.push(...linkedReportCleanupData.failureData);
+    }
 
     if (shouldPlaySoundParam) {
         playSound(SOUNDS.DONE);
