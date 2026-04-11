@@ -29,7 +29,6 @@ import * as FormActions from '@userActions/FormActions';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {ImportedSpreadsheetMemberData, InvitedEmailsToAccountIDs, Policy, PolicyEmployee, PolicyOwnershipChangeChecks, Report, ReportAction, ReportActions} from '@src/types/onyx';
-import type {PendingAction} from '@src/types/onyx/OnyxCommon';
 import type {JoinWorkspaceResolution} from '@src/types/onyx/OriginalMessage';
 import type {ApprovalRule} from '@src/types/onyx/Policy';
 import type {NotificationPreference, Participant} from '@src/types/onyx/Report';
@@ -637,18 +636,47 @@ function buildUpdateWorkspaceMembersRoleOnyxData(policy: OnyxEntry<Policy>, sele
         };
     });
 
+    const updatedMembersOptimisticState = memberRoles.reduce((member: Record<string, Partial<PolicyEmployee>>, current) => {
+        const previousMemberState = previousEmployeeList?.[current.email];
+        // eslint-disable-next-line no-param-reassign
+        member[current.email] = {
+            ...previousMemberState,
+            role: current.role,
+            pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE,
+            errors: undefined,
+        };
+        return member;
+    }, {});
+
+    const updatedMembersSuccessState = memberRoles.reduce((member: Record<string, Partial<PolicyEmployee>>, current) => {
+        const previousMemberState = previousEmployeeList?.[current.email];
+        // eslint-disable-next-line no-param-reassign
+        member[current.email] = {
+            ...previousMemberState,
+            role: current.role,
+            pendingAction: null,
+            errors: undefined,
+        };
+        return member;
+    }, {});
+
+    const updatedMembersFailureState = memberRoles.reduce((member: Record<string, Partial<PolicyEmployee>>, current) => {
+        const previousMemberState = previousEmployeeList?.[current.email];
+        // eslint-disable-next-line no-param-reassign
+        member[current.email] = {
+            ...previousMemberState,
+            pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE,
+            errors: ErrorUtils.getMicroSecondOnyxErrorWithTranslationKey('workspace.editor.genericFailureMessage'),
+        };
+        return member;
+    }, {});
+
     const optimisticData: Array<OnyxUpdate<typeof ONYXKEYS.COLLECTION.POLICY | typeof ONYXKEYS.COLLECTION.REPORT>> = [
         {
             onyxMethod: Onyx.METHOD.MERGE,
             key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
             value: {
-                employeeList: {
-                    ...memberRoles.reduce((member: Record<string, {role: string; pendingAction: PendingAction}>, current) => {
-                        // eslint-disable-next-line no-param-reassign
-                        member[current.email] = {role: current?.role, pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE};
-                        return member;
-                    }, {}),
-                },
+                employeeList: updatedMembersOptimisticState,
                 errors: null,
             },
         },
@@ -659,13 +687,7 @@ function buildUpdateWorkspaceMembersRoleOnyxData(policy: OnyxEntry<Policy>, sele
             onyxMethod: Onyx.METHOD.MERGE,
             key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
             value: {
-                employeeList: {
-                    ...memberRoles.reduce((member: Record<string, {role: string; pendingAction: PendingAction}>, current) => {
-                        // eslint-disable-next-line no-param-reassign
-                        member[current.email] = {role: current?.role, pendingAction: null};
-                        return member;
-                    }, {}),
-                },
+                employeeList: updatedMembersSuccessState,
                 errors: null,
             },
         },
@@ -676,8 +698,8 @@ function buildUpdateWorkspaceMembersRoleOnyxData(policy: OnyxEntry<Policy>, sele
             onyxMethod: Onyx.METHOD.MERGE,
             key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
             value: {
-                employeeList: previousEmployeeList,
-                errors: ErrorUtils.getMicroSecondOnyxErrorWithTranslationKey('workspace.editor.genericFailureMessage'),
+                employeeList: updatedMembersFailureState,
+                errors: null,
             },
         },
     ];
@@ -1180,6 +1202,20 @@ function clearAddMemberError(policyID: string, login: string, accountID: number)
     });
 }
 
+/**
+ * Removes an error after trying to update a member role
+ */
+function clearUpdateMemberRoleError(policyID: string, login: string) {
+    Onyx.merge(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, {
+        employeeList: {
+            [login]: {
+                pendingAction: null,
+                errors: null,
+            },
+        },
+    });
+}
+
 function openWorkspaceMembersPage(policyID: string, clientMemberEmails: string[]) {
     if (!policyID || !clientMemberEmails) {
         Log.warn('openWorkspaceMembersPage invalid params', {policyID, clientMemberEmails});
@@ -1391,6 +1427,7 @@ export {
     addMembersToWorkspace,
     clearDeleteMemberError,
     clearAddMemberError,
+    clearUpdateMemberRoleError,
     openWorkspaceMembersPage,
     setWorkspaceInviteMembersDraft,
     inviteMemberToWorkspace,

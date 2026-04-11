@@ -36,6 +36,7 @@ import {
     clearAddMemberError,
     clearDeleteMemberError,
     clearInviteDraft,
+    clearUpdateMemberRoleError,
     clearWorkspaceOwnerChangeFlow,
     downloadMembersCSV,
     openWorkspaceMembersPage,
@@ -150,7 +151,10 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
     const policyID = route.params.policyID;
     const illustrations = useMemoizedLazyIllustrations(['ReceiptWrangler']);
 
-    const ownerDetails = personalDetails?.[policy?.ownerAccountID ?? CONST.DEFAULT_NUMBER_ID] ?? ({} as PersonalDetails);
+    const ownerDetails = useMemo(
+        () => personalDetails?.[policy?.ownerAccountID ?? CONST.DEFAULT_NUMBER_ID] ?? ({} as PersonalDetails),
+        [personalDetails, policy?.ownerAccountID],
+    );
     const {approvalWorkflows} = useMemo(
         () =>
             convertPolicyEmployeesToApprovalWorkflows({
@@ -228,7 +232,7 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
      * Remove selected users from the workspace
      * Please see https://github.com/Expensify/App/blob/main/README.md#Security for more details
      */
-    const removeUsers = () => {
+    const removeUsers = useCallback(() => {
         // Check if any of the members are approvers
         const hasApprovers = selectedEmployees.some((email) => isPolicyApprover(policy, email));
 
@@ -265,7 +269,7 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
             setSelectedEmployees([]);
             removeMembers(policy, selectedEmployees, policyMemberEmailsToAccountIDs);
         });
-    };
+    }, [selectedEmployees, policy, policyMemberEmailsToAccountIDs, personalDetails, approvalWorkflows, ownerDetails, setSelectedEmployees]);
 
     /**
      * Show the modal to confirm removal of the selected members
@@ -371,6 +375,8 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
         (item: MemberOption) => {
             if (item.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE) {
                 clearDeleteMemberError(route.params.policyID, item.login);
+            } else if (item.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE) {
+                clearUpdateMemberRoleError(route.params.policyID, item.login);
             } else {
                 clearAddMemberError(route.params.policyID, item.login, item.accountID);
             }
@@ -620,8 +626,8 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
         updateWorkspaceMembersRole(policy, loginsToUpdate, accountIDsToUpdate, role);
     };
 
-    const getBulkActionsButtonOptions = () => {
-        const options: Array<DropdownOption<WorkspaceMemberBulkActionType>> = [
+    const bulkActionsButtonOptions = useMemo(() => {
+        const baseOptions: Array<DropdownOption<WorkspaceMemberBulkActionType>> = [
             {
                 text: translate('workspace.people.removeMembersTitle', {count: selectedEmployees.length}),
                 value: CONST.POLICY.MEMBERS_BULK_ACTION_TYPES.REMOVE,
@@ -631,27 +637,27 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
         ];
 
         if (!isPaidGroupPolicy(policy)) {
-            return options;
+            return baseOptions;
         }
 
         const selectedEmployeesRoles = selectedEmployees.map((email) => {
             return policy?.employeeList?.[email]?.role;
         });
 
-        const memberOption = {
+        const memberOption: DropdownOption<WorkspaceMemberBulkActionType> = {
             text: translate('workspace.people.makeMember', {count: selectedEmployees.length}),
             value: CONST.POLICY.MEMBERS_BULK_ACTION_TYPES.MAKE_MEMBER,
             icon: icons.User,
             onSelected: () => changeUserRole(CONST.POLICY.ROLE.USER),
         };
-        const adminOption = {
+        const adminOption: DropdownOption<WorkspaceMemberBulkActionType> = {
             text: translate('workspace.people.makeAdmin', {count: selectedEmployees.length}),
             value: CONST.POLICY.MEMBERS_BULK_ACTION_TYPES.MAKE_ADMIN,
             icon: icons.MakeAdmin,
             onSelected: () => changeUserRole(CONST.POLICY.ROLE.ADMIN),
         };
 
-        const auditorOption = {
+        const auditorOption: DropdownOption<WorkspaceMemberBulkActionType> = {
             text: translate('workspace.people.makeAuditor', {count: selectedEmployees.length}),
             value: CONST.POLICY.MEMBERS_BULK_ACTION_TYPES.MAKE_AUDITOR,
             icon: icons.UserEye,
@@ -664,20 +670,14 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
         const isReimbursementEnabled = policy?.reimbursementChoice === CONST.POLICY.REIMBURSEMENT_CHOICES.REIMBURSEMENT_YES;
         const hasAtLeastOnePayer = isReimbursementEnabled && policy?.achAccount?.reimburser ? selectedEmployees.includes(policy?.achAccount?.reimburser) : false;
 
-        if (hasAtLeastOneNonMemberRole && !hasAtLeastOnePayer) {
-            options.push(memberOption);
-        }
+        const roleChangeOptions: Array<DropdownOption<WorkspaceMemberBulkActionType>> = [
+            ...(hasAtLeastOneNonMemberRole && !hasAtLeastOnePayer ? [memberOption] : []),
+            ...(hasAtLeastOneNonAdminRole ? [adminOption] : []),
+            ...(hasAtLeastOneNonAuditorRole && isControlPolicy(policy) && !hasAtLeastOnePayer ? [auditorOption] : []),
+        ];
 
-        if (hasAtLeastOneNonAdminRole) {
-            options.push(adminOption);
-        }
-
-        if (hasAtLeastOneNonAuditorRole && isControlPolicy(policy) && !hasAtLeastOnePayer) {
-            options.push(auditorOption);
-        }
-
-        return options;
-    };
+        return [...baseOptions, ...roleChangeOptions];
+    }, [translate, selectedEmployees, askForConfirmationToRemove, policy, icons.RemoveMembers, icons.User, icons.MakeAdmin, icons.UserEye, changeUserRole]);
 
     const showRequiresInternetModal = useCallback(() => {
         showConfirmModal({
@@ -737,17 +737,18 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
         return menuItems;
     }, [isPolicyAdmin, icons.Table, icons.Download, translate, isAccountLocked, isOffline, policyID, showLockedAccountModal, showRequiresInternetModal]);
 
-    const getHeaderButtons = () => {
+    const headerButtons = useMemo(() => {
         if (!isPolicyAdmin) {
             return null;
         }
+
         return (shouldUseNarrowLayout ? canSelectMultiple : selectedEmployees.length > 0) ? (
             <ButtonWithDropdownMenu<WorkspaceMemberBulkActionType>
                 shouldAlwaysShowDropdownMenu
                 customText={translate('workspace.common.selected', {count: selectedEmployees.length})}
                 buttonSize={CONST.DROPDOWN_BUTTON_SIZE.MEDIUM}
                 onPress={() => null}
-                options={getBulkActionsButtonOptions()}
+                options={bulkActionsButtonOptions}
                 isSplitButton={false}
                 style={[shouldUseNarrowLayout && styles.flexGrow1, shouldUseNarrowLayout && styles.mb3]}
                 isDisabled={!selectedEmployees.length}
@@ -777,7 +778,23 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
                 />
             </View>
         );
-    };
+    }, [
+        isPolicyAdmin,
+        shouldUseNarrowLayout,
+        canSelectMultiple,
+        selectedEmployees.length,
+        translate,
+        styles.flexGrow1,
+        styles.mb3,
+        styles.flexRow,
+        styles.gap2,
+        styles.alignItemsCenter,
+        styles.flexGrow0,
+        inviteUser,
+        secondaryActions,
+        bulkActionsButtonOptions,
+        icons.Plus,
+    ]);
 
     const selectionModeHeader = isMobileSelectionModeEnabled && shouldUseNarrowLayout;
 
@@ -818,7 +835,7 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
             headerText={selectionModeHeader ? translate('common.selectMultiple') : translate('workspace.common.members')}
             route={route}
             icon={!selectionModeHeader ? illustrations.ReceiptWrangler : undefined}
-            headerContent={!shouldUseNarrowLayout && getHeaderButtons()}
+            headerContent={!shouldUseNarrowLayout && headerButtons}
             testID="WorkspaceMembersPage"
             shouldShowLoading={false}
             shouldUseHeadlineHeader={!selectionModeHeader}
@@ -835,7 +852,7 @@ function WorkspaceMembersPage({personalDetails, route, policy}: WorkspaceMembers
         >
             {() => (
                 <>
-                    {shouldUseNarrowLayout && <View style={[styles.pl5, styles.pr5]}>{getHeaderButtons()}</View>}
+                    {shouldUseNarrowLayout && <View style={[styles.pl5, styles.pr5]}>{headerButtons}</View>}
                     <DecisionModal
                         title={translate('common.downloadFailedTitle')}
                         prompt={translate('common.downloadFailedDescription')}
