@@ -16,6 +16,7 @@ import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
 import useThemeStyles from '@hooks/useThemeStyles';
+import blurActiveElement from '@libs/Accessibility/blurActiveElement';
 import type {CustomRNImageManipulatorResult} from '@libs/cropOrRotateImage/types';
 import {readFileAsync} from '@libs/fileDownload/FileUtils';
 import Navigation from '@libs/Navigation/Navigation';
@@ -162,6 +163,8 @@ function NewChatConfirmPage() {
             return;
         }
 
+        blurActiveElement();
+
         const logins: string[] = (newGroupDraft.participants ?? []).map((participant) => participant.login).filter((login): login is string => !!login);
         navigateToAndCreateGroupChat(
             logins,
@@ -172,8 +175,11 @@ function NewChatConfirmPage() {
             isSelfTourViewed,
             betas,
             personalData.accountID,
-            newGroupDraft.avatarUri ?? '',
-            avatarFile,
+            {
+                avatarUri: newGroupDraft.avatarUri ?? '',
+                avatarFile,
+                shouldFocusComposer: true,
+            },
         );
     };
 

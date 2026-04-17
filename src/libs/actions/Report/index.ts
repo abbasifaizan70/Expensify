@@ -1843,12 +1843,6 @@ function createGroupChat(
         resourceID: reportID,
     };
 
-    // Clear group chat data after navigation dismissed so we don't see stale data
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    InteractionManager.runAfterInteractions(() => {
-        clearGroupChat();
-    });
-
     API.paginate(CONST.API_REQUEST_TYPE.WRITE, WRITE_COMMANDS.OPEN_REPORT, parameters, {optimisticData, successData, failureData}, paginationConfig, {
         checkAndFixConflictingRequest: (persistedRequests) => resolveOpenReportDuplicationConflictAction(persistedRequests, parameters),
     });
@@ -1952,7 +1946,12 @@ function createTransactionThreadReport(
  * @param reportID The ID of the report to navigate to
  * @param shouldDismissModal Whether to dismiss the modal before navigating
  */
-function navigateToReport(reportID: string | undefined, shouldDismissModal = true) {
+function navigateToReport(reportID: string | undefined, shouldDismissModal = true, shouldFocusComposer = false) {
+    if (shouldDismissModal && shouldFocusComposer && reportID) {
+        Navigation.dismissModalWithReport({reportID});
+        return;
+    }
+
     if (shouldDismissModal) {
         Navigation.dismissModal({
             afterTransition: () => {
@@ -1966,7 +1965,8 @@ function navigateToReport(reportID: string | undefined, shouldDismissModal = tru
     } else if (reportID) {
         Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(reportID));
     }
-    // In some cases when RHP modal gets hidden and then we navigate to report Composer focus breaks, wrapping navigation in setTimeout fixes this
+
+    // In some cases when RHP modal gets hidden and then we navigate to report Composer focus breaks, wrapping navigation in setTimeout fixes this.
     setTimeout(() => {
         Navigation.isNavigationReady().then(() => Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(reportID)));
     }, 0);
@@ -2014,16 +2014,26 @@ function navigateToAndCreateGroupChat(
     isSelfTourViewed: boolean | undefined,
     betas: OnyxEntry<Beta[]>,
     currentUserAccountID: number,
-    avatarUri?: string,
-    avatarFile?: File | CustomRNImageManipulatorResult | undefined,
+    options?: {
+        avatarUri?: string;
+        avatarFile?: File | CustomRNImageManipulatorResult | undefined;
+        shouldFocusComposer?: boolean;
+    },
 ) {
     const participantAccountIDs = PersonalDetailsUtils.getAccountIDsByLogins(userLogins);
+    const {avatarUri, avatarFile, shouldFocusComposer = false} = options ?? {};
 
     // If we are creating a group chat then participantAccountIDs is expected to contain currentUserAccountID
     const newChat = buildOptimisticGroupChatReport(participantAccountIDs, reportName, avatarUri ?? '', currentUserAccountID, optimisticReportID, CONST.REPORT.NOTIFICATION_PREFERENCE.HIDDEN);
     createGroupChat(newChat.reportID, userLogins, newChat, currentUserLogin, introSelected, isSelfTourViewed, betas, avatarFile);
 
-    navigateToReport(newChat.reportID);
+    navigateToReport(newChat.reportID, true, shouldFocusComposer);
+
+    // Clear group draft after the modal transition finishes so the confirmation page
+    // does not re-render and tear down its focused footer button mid-navigation.
+    setTimeout(() => {
+        clearGroupChat();
+    }, CONST.ANIMATED_TRANSITION);
 }
 
 /**
