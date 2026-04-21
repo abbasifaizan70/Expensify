@@ -1,9 +1,11 @@
 import {Str} from 'expensify-common';
 import {useContext} from 'react';
 import type {OnyxEntry} from 'react-native-onyx';
+import {delegateEmailSelector} from '@selectors/Account';
 import {usePersonalDetails} from '@components/OnyxListItemProvider';
 import useAncestors from '@hooks/useAncestors';
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
+import useHasOutstandingChildTask from '@hooks/useHasOutstandingChildTask';
 import useIsInSidePanel from '@hooks/useIsInSidePanel';
 import useNetwork from '@hooks/useNetwork';
 import useOnyx from '@hooks/useOnyx';
@@ -11,12 +13,13 @@ import usePaginatedReportActions from '@hooks/usePaginatedReportActions';
 import useReportTransactionsCollection from '@hooks/useReportTransactionsCollection';
 import useShortMentionsList from '@hooks/useShortMentionsList';
 import {addAttachmentWithComment, addComment} from '@libs/actions/Report';
-import {createTaskAndNavigate, setNewOptimisticAssignee} from '@libs/actions/Task';
+import {createTaskAndNavigate, editTaskAssignee, setAssigneeValue, setNewOptimisticAssignee} from '@libs/actions/Task';
 import {isEmailPublicDomain} from '@libs/LoginUtils';
 import {getAllNonDeletedTransactions} from '@libs/MoneyRequestReportUtils';
 import {rand64} from '@libs/NumberUtils';
 import {addDomainToShortMention} from '@libs/ParsingUtils';
 import {getFilteredReportActionsForReportView, getOneTransactionThreadReportID, isSentMoneyReportAction} from '@libs/ReportActionsUtils';
+import {isTaskReport} from '@libs/ReportUtils';
 import {startSpan} from '@libs/telemetry/activeSpans';
 import {generateAccountID} from '@libs/UserUtils';
 import {useAgentZeroStatusActions} from '@pages/inbox/AgentZeroStatusContext';
@@ -25,6 +28,11 @@ import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type * as OnyxTypes from '@src/types/onyx';
 import {useComposerMeta} from './ComposerContext';
+
+// Captures the first `@email` (or `@shortMention`) inside a chat message. Optionally tolerates a
+// single connector word like `to` directly before the mention so that messages such as
+// "Ship it @user@domain.com" and "Ship it to @user@domain.com" both yield `user@domain.com`.
+const TASK_AUTO_ASSIGN_MENTION_REGEX = /(?:^|\s)(?:to\s+)?@([\w.'#%+-]+(?:@[\w-]+(?:\.[\w-]+)+)?)(?=\s|$)/i;
 
 function useComposerSubmit(reportID: string): (comment: string) => void {
     const {isOffline} = useNetwork();
@@ -40,6 +48,9 @@ function useComposerSubmit(reportID: string): (comment: string) => void {
 
     const [report] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${reportID}`);
     const [chatReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${report?.chatReportID}`);
+    const [parentReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${report?.parentReportID}`);
+    const [delegateEmail] = useOnyx(ONYXKEYS.ACCOUNT, {selector: delegateEmailSelector});
+    const hasOutstandingChildTask = useHasOutstandingChildTask(report);
 
     const {reportActions: unfilteredReportActions} = usePaginatedReportActions(report?.reportID);
     const filteredReportActions = getFilteredReportActionsForReportView(unfilteredReportActions);
@@ -143,6 +154,59 @@ function useComposerSubmit(reportID: string): (comment: string) => void {
             shouldPlaySound: true,
             isInSidePanel,
             reportActionID: optimisticReportActionID,
+        });
+
+        // When the message was sent inside an open task report that does not yet have an assignee,
+        // auto-assign the task to the first @-mentioned user. This makes drive-by comments such as
+        // "Ship it @user@domain.com" or "Ship it to @user@domain.com" actually update the Assignee
+        // field, matching the documented expectation.
+        if (!targetReport || !isTaskReport(targetReport) || targetReport.managerID) {
+            return;
+        }
+        const mentionMatch = newCommentTrimmed.match(TASK_AUTO_ASSIGN_MENTION_REGEX);
+        const mentionedLogin = mentionMatch?.[1]?.trim();
+        if (!mentionedLogin) {
+            return;
+        }
+        const userPrivateDomain = isEmailPublicDomain(currentUserEmail) ? '' : Str.extractEmailDomain(currentUserEmail);
+        const resolvedLogin = addDomainToShortMention(mentionedLogin, availableLoginsList, userPrivateDomain) ?? mentionedLogin;
+        if (!Str.isValidEmail(resolvedLogin)) {
+            return;
+        }
+        let assigneePersonalDetails: OnyxTypes.PersonalDetails | undefined =
+            Object.values(personalDetails ?? {}).find((value) => value?.login === resolvedLogin) ?? undefined;
+        let optimisticAssigneeChatReport: OnyxEntry<OnyxTypes.Report> | undefined;
+        if (!assigneePersonalDetails?.accountID) {
+            const optimisticDataForNewAssignee = setNewOptimisticAssignee(currentUserPersonalDetails.accountID, {
+                accountID: generateAccountID(resolvedLogin),
+                login: resolvedLogin,
+            });
+            assigneePersonalDetails = optimisticDataForNewAssignee.assignee;
+            optimisticAssigneeChatReport = optimisticDataForNewAssignee.assigneeReport;
+        }
+        if (!assigneePersonalDetails?.accountID || assigneePersonalDetails.accountID === targetReport.managerID) {
+            return;
+        }
+        const {report: assigneeChatReport, isOptimisticReport} = setAssigneeValue(
+            currentUserPersonalDetails.accountID,
+            assigneePersonalDetails,
+            targetReport.reportID,
+            optimisticAssigneeChatReport,
+            assigneePersonalDetails.accountID === currentUserPersonalDetails.accountID,
+            true,
+        );
+        editTaskAssignee({
+            report: targetReport,
+            parentReport,
+            sessionAccountID: currentUserPersonalDetails.accountID,
+            assigneeEmail: assigneePersonalDetails.login ?? '',
+            currentUserEmail,
+            currentUserAccountID: currentUserPersonalDetails.accountID,
+            hasOutstandingChildTask,
+            delegateEmail,
+            assigneeAccountID: assigneePersonalDetails.accountID,
+            assigneeChatReport,
+            isOptimisticReport,
         });
     };
 }
