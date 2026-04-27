@@ -4,6 +4,7 @@ import React, {useEffect, useState} from 'react';
 import type {OnyxEntry} from 'react-native-onyx';
 import FullPageNotFoundView from '@components/BlockingViews/FullPageNotFoundView';
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
+import useNetwork from '@hooks/useNetwork';
 import useOnyx from '@hooks/useOnyx';
 import useReportIsArchived from '@hooks/useReportIsArchived';
 import useResponsiveLayout from '@hooks/useResponsiveLayout';
@@ -11,7 +12,7 @@ import useThemeStyles from '@hooks/useThemeStyles';
 import getNonEmptyStringOnyxID from '@libs/getNonEmptyStringOnyxID';
 import Log from '@libs/Log';
 import Navigation from '@libs/Navigation/Navigation';
-import {isReportActionVisible, isWhisperAction} from '@libs/ReportActionsUtils';
+import {getOneTransactionThreadReportID, isReportActionVisible, isWhisperAction} from '@libs/ReportActionsUtils';
 import {canUserPerformWriteAction} from '@libs/ReportUtils';
 import ONYXKEYS from '@src/ONYXKEYS';
 import {getReportActionByIDSelector} from '@src/selectors/ReportAction';
@@ -59,15 +60,32 @@ function LinkedActionNotFoundGate({reportActionIDFromRoute, children}: LinkedAct
     const styles = useThemeStyles();
     const {accountID: currentUserAccountID} = useCurrentUserPersonalDetails();
     const {shouldUseNarrowLayout} = useResponsiveLayout();
+    const {isOffline} = useNetwork();
 
     const [report] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${reportIDFromRoute}`);
+    const [chatReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${getNonEmptyStringOnyxID(report?.chatReportID)}`);
     const [isLoadingInitialReportActions = true] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_METADATA}${reportIDFromRoute}`, {
         selector: isLoadingInitialReportActionsSelector,
     });
-    const [linkedAction] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${reportIDFromRoute}`, {
+    const [reportActions] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${reportIDFromRoute}`);
+    const [linkedActionInRoute] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${reportIDFromRoute}`, {
         selector: (actions: OnyxEntry<ReportActions>) => getReportActionByIDSelector(actions, reportActionIDFromRoute),
     });
     const [visibleReportActionsData] = useOnyx(ONYXKEYS.DERIVED.VISIBLE_REPORT_ACTIONS);
+
+    // For one-transaction expense flows, the linked action may live in the transaction-thread's
+    // actions collection rather than the route's report. Fall back to looking it up there so a
+    // copied link of a thread message opened in the parent expense context isn't flagged "not found".
+    const transactionThreadReportID = getOneTransactionThreadReportID(report, chatReport, reportActions ?? {}, isOffline);
+    const [linkedActionInTransactionThread] = useOnyx(
+        `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${getNonEmptyStringOnyxID(transactionThreadReportID)}`,
+        {
+            selector: (actions: OnyxEntry<ReportActions>) => getReportActionByIDSelector(actions, reportActionIDFromRoute),
+        },
+        [reportActionIDFromRoute],
+    );
+
+    const linkedAction = linkedActionInRoute ?? linkedActionInTransactionThread;
 
     const isReportArchived = useReportIsArchived(reportIDFromRoute);
 

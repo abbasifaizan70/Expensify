@@ -45,7 +45,13 @@ function usePaginatedReportActions(reportID: string | undefined, reportActionID?
 
     const id = useMemo(() => {
         if (reportActionID) {
-            return reportActionID;
+            // The action may live in a sibling/child report (e.g. the transaction-thread of a one-transaction
+            // expense). In that case the action ID is not in this report's actions collection, so anchoring
+            // to it via PaginationUtils would yield an empty chain. Fall back to the latest page so the host
+            // screen can still render its actions and merge in the sibling/child actions to surface the linked
+            // message.
+            const isInThisReport = sortedAllReportActions?.some((action) => action.reportActionID === reportActionID) ?? false;
+            return isInThisReport ? reportActionID : undefined;
         }
 
         if (!shouldLinkToOldestUnreadReportAction) {
