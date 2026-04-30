@@ -43,7 +43,7 @@ import useThemeStyles from '@hooks/useThemeStyles';
 import {cleanUpMoneyRequest} from '@libs/actions/IOU/DeleteMoneyRequest';
 import {isChronosOOOListAction} from '@libs/ChronosUtils';
 import ControlSelection from '@libs/ControlSelection';
-import {canUseTouchScreen} from '@libs/DeviceCapabilities';
+import {canUseTouchScreen, hasHoverSupport} from '@libs/DeviceCapabilities';
 import type {OnyxDataWithErrors} from '@libs/ErrorUtils';
 import {getLatestErrorMessageField, isReceiptError} from '@libs/ErrorUtils';
 import focusComposerWithDelay from '@libs/focusComposerWithDelay';
@@ -1137,14 +1137,14 @@ function PureReportActionItem({
                     Keyboard.dismiss();
                 }}
                 style={[action.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE && !isDeletedParentAction ? styles.pointerEventsNone : styles.pointerEventsAuto]}
-                onPressIn={() => shouldUseNarrowLayout && canUseTouchScreen() && ControlSelection.block()}
+                onPressIn={() => shouldUseNarrowLayout && canUseTouchScreen() && !hasHoverSupport() && ControlSelection.block()}
                 onPressOut={() => ControlSelection.unblock()}
                 onSecondaryInteraction={showPopover}
                 preventDefaultContextMenu={draftMessage === undefined && !hasErrors}
                 withoutFocusOnSecondaryInteraction
                 accessibilityLabel={accessibilityLabel}
                 accessibilityHint={translate('accessibilityHints.chatMessage')}
-                accessibilityRole={CONST.ROLE.BUTTON}
+                accessibilityRole={!canUseTouchScreen() || hasHoverSupport() ? undefined : CONST.ROLE.BUTTON}
                 sentryLabel={CONST.SENTRY_LABEL.REPORT.PURE_REPORT_ACTION_ITEM}
             >
                 <Hoverable
