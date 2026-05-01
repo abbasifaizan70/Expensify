@@ -10,7 +10,7 @@ import useResponsiveLayout from '@hooks/useResponsiveLayout';
 import useTheme from '@hooks/useTheme';
 import useThemeStyles from '@hooks/useThemeStyles';
 import convertToLTR from '@libs/convertToLTR';
-import {canUseTouchScreen, hasHoverSupport} from '@libs/DeviceCapabilities';
+import {canUseTouchScreen} from '@libs/DeviceCapabilities';
 import {containsOnlyCustomEmoji as containsOnlyCustomEmojiUtil, containsOnlyEmojis as containsOnlyEmojisUtil, splitTextWithEmojis} from '@libs/EmojiUtils';
 import hydrateEmojiHtml from '@libs/hydrateEmojiHtml';
 import Parser from '@libs/Parser';
@@ -111,7 +111,7 @@ function TextCommentFragment({fragment, styleAsDeleted, reportActionID, styleAsM
     }
 
     return (
-        <Text style={[containsOnlyEmojis && styles.onlyEmojisText, styles.ltr, style, (!canUseTouchScreen() || hasHoverSupport()) || !shouldUseNarrowLayout ? styles.userSelectText : styles.userSelectNone]}>
+        <Text style={[containsOnlyEmojis && styles.onlyEmojisText, styles.ltr, style, !canUseTouchScreen() || !shouldUseNarrowLayout ? styles.userSelectText : styles.userSelectNone]}>
             <ZeroWidthView
                 text={text}
                 displayAsGroup={displayAsGroup}

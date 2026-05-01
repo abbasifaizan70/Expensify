@@ -7,7 +7,7 @@ import BaseHTMLEngineProvider from './BaseHTMLEngineProvider';
 function HTMLEngineProvider({children}: ChildrenProps) {
     const {shouldUseNarrowLayout} = useResponsiveLayout();
 
-    return <BaseHTMLEngineProvider textSelectable={(!DeviceCapabilities.canUseTouchScreen() || DeviceCapabilities.hasHoverSupport()) || !shouldUseNarrowLayout}>{children}</BaseHTMLEngineProvider>;
+    return <BaseHTMLEngineProvider textSelectable={!DeviceCapabilities.canUseTouchScreen() || !shouldUseNarrowLayout}>{children}</BaseHTMLEngineProvider>;
 }
 
 export default HTMLEngineProvider;

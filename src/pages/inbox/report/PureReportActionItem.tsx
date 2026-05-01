@@ -1137,14 +1137,14 @@ function PureReportActionItem({
                     Keyboard.dismiss();
                 }}
                 style={[action.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE && !isDeletedParentAction ? styles.pointerEventsNone : styles.pointerEventsAuto]}
-                onPressIn={() => shouldUseNarrowLayout && canUseTouchScreen() && !hasHoverSupport() && ControlSelection.block()}
+                onPressIn={() => shouldUseNarrowLayout && canUseTouchScreen() && ControlSelection.block()}
                 onPressOut={() => ControlSelection.unblock()}
                 onSecondaryInteraction={showPopover}
                 preventDefaultContextMenu={draftMessage === undefined && !hasErrors}
                 withoutFocusOnSecondaryInteraction
                 accessibilityLabel={accessibilityLabel}
                 accessibilityHint={translate('accessibilityHints.chatMessage')}
-                accessibilityRole={!canUseTouchScreen() || hasHoverSupport() ? undefined : CONST.ROLE.BUTTON}
+                accessibilityRole={hasHoverSupport() ? undefined : CONST.ROLE.BUTTON}
                 sentryLabel={CONST.SENTRY_LABEL.REPORT.PURE_REPORT_ACTION_ITEM}
             >
                 <Hoverable
