@@ -41,7 +41,7 @@ import {
     hasViolations as hasViolationsReportUtils,
     shouldEnableNegative,
 } from '@libs/ReportUtils';
-import {hasPendingRTERViolation, isDeletedTransaction, isManagedCardTransaction, isOnHold, shouldClearConvertedAmount, waypointHasValidAddress} from '@libs/TransactionUtils';
+import {hasPendingRTERViolation, hasSubmissionBlockingViolations, isDeletedTransaction, isManagedCardTransaction, isOnHold, shouldClearConvertedAmount, waypointHasValidAddress} from '@libs/TransactionUtils';
 import ViolationsUtils from '@libs/Violations/ViolationsUtils';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
@@ -95,9 +95,19 @@ Onyx.connect({
     callback: (val) => (allTransactionViolations = val ?? []),
 });
 
-// Helper to safely check for a string 'name' property
-function isViolationWithName(violation: unknown): violation is {name: string} {
-    return !!(violation && typeof violation === 'object' && typeof (violation as {name?: unknown}).name === 'string');
+function hasSubmissionBlockingViolationsFromUpdate(transaction: Transaction, transactionViolations: unknown, report: OnyxEntry<Report>, policy: OnyxEntry<Policy>, email: string, accountID: number): boolean {
+    if (!Array.isArray(transactionViolations)) {
+        return false;
+    }
+
+    return hasSubmissionBlockingViolations(
+        transaction,
+        {[`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transaction.transactionID}`]: transactionViolations},
+        email,
+        accountID,
+        report,
+        policy,
+    );
 }
 
 type SaveWaypointProps = {
@@ -1074,48 +1084,7 @@ function changeTransactionsReport({
         const shouldCopyOriginalAmount = transaction.originalAmount !== undefined && transaction.originalAmount !== transaction.amount;
         const shouldCopyOriginalCurrency = transaction.originalCurrency !== undefined && transaction.originalCurrency !== transaction.currency;
 
-        // 1. Optimistically update the transaction with full data and changed fields.
-        // Spreading the full transaction ensures the TRANSACTION collection has complete data
-        // (e.g. amount) even when the existing entry was incomplete from search results.
-        optimisticData.push({
-            onyxMethod: Onyx.METHOD.MERGE,
-            key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
-            value: {
-                ...transaction,
-                reportID,
-                comment,
-                originalAmount: shouldCopyOriginalAmount ? transaction.originalAmount : null,
-                originalCurrency: shouldCopyOriginalCurrency ? transaction.originalCurrency : null,
-                ...(shouldClearAmount && {pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE}),
-                ...(shouldClearAmount && {convertedAmount: null}),
-                ...(shouldClearAmount && {convertedTaxAmount: null}),
-                ...(oldIOUAction ? {linkedTrackedExpenseReportAction: newIOUAction} : {}),
-            },
-        });
-
-        successData.push({
-            onyxMethod: Onyx.METHOD.MERGE,
-            key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
-            value: {
-                reportID,
-                ...(shouldClearAmount && {pendingAction: null}),
-            },
-        });
-
-        failureData.push({
-            onyxMethod: Onyx.METHOD.MERGE,
-            key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
-            value: {
-                reportID: transaction.reportID,
-                comment: transaction.comment,
-                originalAmount: transaction.originalAmount,
-                originalCurrency: transaction.originalCurrency,
-                ...(shouldClearAmount && {pendingAction: transaction.pendingAction ?? null}),
-                ...(shouldClearAmount && {convertedAmount: transaction.convertedAmount}),
-                ...(shouldClearAmount && {convertedTaxAmount: transaction.convertedTaxAmount}),
-            },
-        });
-
+        let transactionReimbursable = transaction.reimbursable;
         // Optimistically clear all violations for the transaction when moving to self DM report
         if (isUnreported) {
             const duplicateViolation = currentTransactionViolations?.[transaction.transactionID]?.find((violation) => violation.name === CONST.VIOLATIONS.DUPLICATED_TRANSACTION);
@@ -1148,8 +1117,7 @@ function changeTransactionsReport({
             });
         }
 
-        let transactionReimbursable = transaction.reimbursable;
-        // 2. Calculate transaction violations if moving transaction to a workspace
+        // 1. Calculate transaction violations before moving the transaction so the destination report never briefly reads stale blocking violations.
         if (isPaidGroupPolicy(policy) && policy?.id) {
             const violationData = ViolationsUtils.getViolationsOnyxData(
                 transaction,
@@ -1166,16 +1134,7 @@ function changeTransactionsReport({
                 key: `${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transaction.transactionID}`,
                 value: allTransactionViolation?.[transaction.transactionID] ?? null,
             });
-            const transactionHasViolations = Array.isArray(violationData.value) && violationData.value.length > 0;
-            const hasOtherViolationsBesideDuplicates =
-                Array.isArray(violationData.value) &&
-                !violationData.value.every((violation) => {
-                    if (!isViolationWithName(violation)) {
-                        return false;
-                    }
-                    return violation.name === CONST.VIOLATIONS.DUPLICATED_TRANSACTION;
-                });
-            if (transactionHasViolations && hasOtherViolationsBesideDuplicates) {
+            if (hasSubmissionBlockingViolationsFromUpdate(transaction, violationData.value, newReport, policy, email ?? '', accountID)) {
                 shouldFixViolations = true;
             }
             if (policy?.disabledFields?.reimbursable) {
@@ -1196,6 +1155,49 @@ function changeTransactionsReport({
                 });
             }
         }
+
+        // 2. Optimistically update the transaction with full data and changed fields.
+        // Spreading the full transaction ensures the TRANSACTION collection has complete data
+        // (e.g. amount) even when the existing entry was incomplete from search results.
+        optimisticData.push({
+            onyxMethod: Onyx.METHOD.MERGE,
+            key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
+            value: {
+                ...transaction,
+                reportID,
+                reimbursable: transactionReimbursable,
+                comment,
+                originalAmount: shouldCopyOriginalAmount ? transaction.originalAmount : null,
+                originalCurrency: shouldCopyOriginalCurrency ? transaction.originalCurrency : null,
+                ...(shouldClearAmount && {pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE}),
+                ...(shouldClearAmount && {convertedAmount: null}),
+                ...(shouldClearAmount && {convertedTaxAmount: null}),
+                ...(oldIOUAction ? {linkedTrackedExpenseReportAction: newIOUAction} : {}),
+            },
+        });
+
+        successData.push({
+            onyxMethod: Onyx.METHOD.MERGE,
+            key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
+            value: {
+                reportID,
+                ...(shouldClearAmount && {pendingAction: null}),
+            },
+        });
+
+        failureData.push({
+            onyxMethod: Onyx.METHOD.MERGE,
+            key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
+            value: {
+                reportID: transaction.reportID,
+                comment: transaction.comment,
+                originalAmount: transaction.originalAmount,
+                originalCurrency: transaction.originalCurrency,
+                ...(shouldClearAmount && {pendingAction: transaction.pendingAction ?? null}),
+                ...(shouldClearAmount && {convertedAmount: transaction.convertedAmount}),
+                ...(shouldClearAmount && {convertedTaxAmount: transaction.convertedTaxAmount}),
+            },
+        });
 
         const allowNegative = shouldEnableNegative(newReport);
 
@@ -1563,15 +1565,7 @@ function changeTransactionsReport({
             policyHasDependentTags,
             false,
         );
-        const hasOtherViolationsBesideDuplicates =
-            Array.isArray(violationData.value) &&
-            !violationData.value.every((violation) => {
-                if (!isViolationWithName(violation)) {
-                    return false;
-                }
-                return violation.name === CONST.VIOLATIONS.DUPLICATED_TRANSACTION;
-            });
-        if (Array.isArray(violationData.value) && violationData.value.length > 0 && hasOtherViolationsBesideDuplicates) {
+        if (hasSubmissionBlockingViolationsFromUpdate(transaction, violationData.value, newReport, policy, email ?? '', accountID)) {
             shouldFixViolations = true;
         }
     }

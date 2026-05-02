@@ -7,7 +7,7 @@ import IntlStore from '@src/languages/IntlStore';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {Attendee} from '@src/types/onyx/IOU';
 import * as TransactionUtils from '../../src/libs/TransactionUtils';
-import type {Card, Policy, Report, Transaction} from '../../src/types/onyx';
+import type {Card, Policy, Report, Transaction, TransactionViolation} from '../../src/types/onyx';
 import createRandomPolicy, {createCategoryTaxExpenseRules} from '../utils/collections/policies';
 import {createRandomReport} from '../utils/collections/reports';
 import waitForBatchedUpdates from '../utils/waitForBatchedUpdates';
@@ -581,6 +581,46 @@ describe('TransactionUtils', () => {
         it('returns correct tax amount for valid percentage and amount', () => {
             const result = TransactionUtils.calculateTaxAmount('10%', 10000, 2);
             expect(result).toBe(9.09);
+        });
+    });
+
+    describe('hasSubmissionBlockingViolations', () => {
+        const smartScanFailedViolation: TransactionViolation = {
+            name: CONST.VIOLATIONS.SMARTSCAN_FAILED,
+            type: CONST.VIOLATION_TYPES.WARNING,
+            showInReview: true,
+        };
+
+        it('ignores stale SmartScan failed violations when the transaction no longer has a failed scan with missing fields', () => {
+            const transaction = generateTransaction({
+                amount: 100,
+                merchant: 'K',
+                receipt: {
+                    source: 'receipt.jpg',
+                    state: CONST.IOU.RECEIPT_STATE.OPEN,
+                },
+            });
+            const transactionViolations = {
+                [`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transaction.transactionID}`]: [smartScanFailedViolation],
+            };
+
+            expect(TransactionUtils.hasSubmissionBlockingViolations(transaction, transactionViolations, CURRENT_USER_EMAIL, CURRENT_USER_ID, openReport, undefined)).toBe(false);
+        });
+
+        it('treats SmartScan failed violations as blocking when the scan failed and required fields are missing', () => {
+            const transaction = generateTransaction({
+                amount: 0,
+                merchant: CONST.TRANSACTION.PARTIAL_TRANSACTION_MERCHANT,
+                receipt: {
+                    source: 'receipt.jpg',
+                    state: CONST.IOU.RECEIPT_STATE.SCAN_FAILED,
+                },
+            });
+            const transactionViolations = {
+                [`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transaction.transactionID}`]: [smartScanFailedViolation],
+            };
+
+            expect(TransactionUtils.hasSubmissionBlockingViolations(transaction, transactionViolations, CURRENT_USER_EMAIL, CURRENT_USER_ID, openReport, undefined)).toBe(true);
         });
     });
 

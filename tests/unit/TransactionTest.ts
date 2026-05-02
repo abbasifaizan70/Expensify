@@ -18,7 +18,7 @@ import type {ReportCollectionDataSet} from '@src/types/onyx/Report';
 import type {OnyxData} from '@src/types/onyx/Request';
 import type {UpdateMoneyRequestDataKeys} from '../../src/libs/actions/IOU/UpdateMoneyRequest';
 import * as TransactionUtils from '../../src/libs/TransactionUtils';
-import type {PersonalDetails, PolicyTagLists, RecentWaypoint, Report, ReportAction, ReportActions, Transaction} from '../../src/types/onyx';
+import type {PersonalDetails, PolicyTagLists, RecentWaypoint, Report, ReportAction, ReportActions, ReportNextStepDeprecated, Transaction} from '../../src/types/onyx';
 import createRandomPolicy from '../utils/collections/policies';
 import createRandomPolicyCategories from '../utils/collections/policyCategory';
 import {createExpenseReport, createRandomReport} from '../utils/collections/reports';
@@ -941,6 +941,70 @@ describe('Transaction', () => {
             const nextStepMessage = nextStep?.message?.map((part) => part.text).join('');
 
             expect(nextStepMessage).toEqual('Waiting for You to submit %expenses.');
+        });
+
+        it('queues violation recalculation before moving a transaction to a report', async () => {
+            const mockAPIWrite = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const policyID = '12347';
+            const oldExpenseReportID = '6';
+            const transaction = generateTransaction({
+                reportID: oldExpenseReportID,
+                receipt: {
+                    source: 'receipt.jpg',
+                    state: CONST.IOU.RECEIPT_STATE.OPEN,
+                },
+            });
+            const smartScanFailedViolation: TransactionViolation = {
+                name: CONST.VIOLATIONS.SMARTSCAN_FAILED,
+                type: CONST.VIOLATION_TYPES.WARNING,
+                showInReview: true,
+            };
+            const newOpenReport = {...createExpenseReport(6335), policyID, stateNum: CONST.REPORT.STATE_NUM.OPEN, statusNum: CONST.REPORT.STATUS_NUM.OPEN, ownerAccountID: CURRENT_USER_ID};
+            const policy = {
+                ...createRandomPolicy(Number(policyID), CONST.POLICY.TYPE.TEAM),
+                autoReportingFrequency: CONST.POLICY.AUTO_REPORTING_FREQUENCIES.IMMEDIATE,
+                requiresCategory: false,
+                requiresTag: false,
+            };
+
+            await Onyx.merge(`${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`, transaction);
+            await Onyx.merge(`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transaction.transactionID}`, [smartScanFailedViolation]);
+            await waitForBatchedUpdates();
+
+            const allTransactions = {
+                [`${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`]: transaction,
+            };
+
+            changeTransactionsReport({
+                transactionIDs: [transaction.transactionID],
+                isASAPSubmitBetaEnabled: false,
+                accountID: CURRENT_USER_ID,
+                email: 'test@gmail.com',
+                newReport: newOpenReport,
+                policy,
+                reportNextStep: undefined,
+                policyCategories: {},
+                allTransactions,
+                policyTagList: undefined,
+            });
+
+            expect(mockAPIWrite).toHaveBeenCalled();
+
+            const apiWriteCall = mockAPIWrite.mock.calls.at(0);
+            const optimisticData = (apiWriteCall?.[2] as {optimisticData?: Array<{key: string; value: unknown}>})?.optimisticData ?? [];
+            const violationUpdateIndex = optimisticData.findIndex((data) => data.key === `${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transaction.transactionID}`);
+            const transactionMoveIndex = optimisticData.findIndex(
+                (data) => data.key === `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}` && (data.value as Transaction | undefined)?.reportID === newOpenReport.reportID,
+            );
+            const nextStepUpdate = optimisticData.find((data) => data.key === `${ONYXKEYS.COLLECTION.NEXT_STEP}${newOpenReport.reportID}`);
+            const nextStepMessage = (nextStepUpdate?.value as ReportNextStepDeprecated | undefined)?.message?.map((part) => part.text).join('');
+
+            expect(violationUpdateIndex).toBeGreaterThanOrEqual(0);
+            expect(transactionMoveIndex).toBeGreaterThanOrEqual(0);
+            expect(violationUpdateIndex).toBeLessThan(transactionMoveIndex);
+            expect(nextStepMessage).not.toContain('fix the issues');
+
+            mockAPIWrite.mockRestore();
         });
 
         it('should decrement source and increment destination transactionCount on cross-currency move', async () => {

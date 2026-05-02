@@ -2779,7 +2779,17 @@ function hasSubmissionBlockingViolations(
     policy: OnyxEntry<Policy>,
 ): boolean {
     const violations = getTransactionViolations(transaction, transactionViolations, currentUserEmail, currentUserAccountID, report, policy);
-    return !!violations?.some((violation) => violation.name === CONST.VIOLATIONS.SMARTSCAN_FAILED || violation.name === CONST.VIOLATIONS.NO_ROUTE);
+    return !!violations?.some((violation) => {
+        if (violation.name === CONST.VIOLATIONS.NO_ROUTE) {
+            return true;
+        }
+
+        if (violation.name !== CONST.VIOLATIONS.SMARTSCAN_FAILED) {
+            return false;
+        }
+
+        return isScanRequest(transaction) && transaction.receipt?.state === CONST.IOU.RECEIPT_STATE.SCAN_FAILED && hasMissingSmartscanFields(transaction, report);
+    });
 }
 
 /**

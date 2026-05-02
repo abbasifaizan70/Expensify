@@ -1176,8 +1176,13 @@ describe('libs/NextStepUtils', () => {
             const transaction: Transaction = {
                 transactionID: 'txn-1',
                 reportID: report.reportID,
-                amount: -500,
+                amount: 0,
                 currency: CONST.CURRENCY.USD,
+                merchant: CONST.TRANSACTION.PARTIAL_TRANSACTION_MERCHANT,
+                receipt: {
+                    source: 'receipt.jpg',
+                    state: CONST.IOU.RECEIPT_STATE.SCAN_FAILED,
+                },
             } as Transaction;
 
             const transactionViolations: OnyxCollection<TransactionViolations> = {
