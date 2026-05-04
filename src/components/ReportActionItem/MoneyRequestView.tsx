@@ -96,6 +96,7 @@ import {
     hasMissingSmartscanFields,
     hasReservationList,
     hasRoute as hasRouteTransactionUtils,
+    isFetchingWaypointsFromServer,
     isFromCreditCardImport as isCardTransactionTransactionUtils,
     isCategoryBeingAnalyzed,
     isCustomUnitRateIDForP2P,
@@ -282,7 +283,10 @@ function MoneyRequestView({
     const isOdometerDistanceRequest = isOdometerDistanceRequestTransactionUtils(transaction);
     const isMapDistanceRequest = isMapDistanceRequestTransactionUtils(transaction) || isDistanceTypeRequest(transaction);
     const isTransactionScanning = isScanning(updatedTransaction ?? transaction);
-    const hasRoute = hasRouteTransactionUtils(transactionBackup ?? transaction, isDistanceRequest);
+    // Only prefer the backup when it's a clean pre-edit snapshot. If the backup itself already has
+    // pending waypoints it represents an in-flight prior offline edit and the live transaction is fresher.
+    const safeBackup = isFetchingWaypointsFromServer(transactionBackup) ? undefined : transactionBackup;
+    const hasRoute = hasRouteTransactionUtils(safeBackup ?? transaction, isDistanceRequest);
 
     const rawActualAttendees = isFromMergeTransaction && updatedTransaction ? updatedTransaction.comment?.attendees : transactionAttendees;
     const actualAttendees = enrichAndSortAttendees(rawActualAttendees, personalDetailsList, localeCompare);
@@ -454,7 +458,7 @@ function MoneyRequestView({
     let dateDescription = `${translate('common.date')}`;
 
     const {unit, rate, name: rateName} = DistanceRequestUtils.getRate({transaction: updatedTransaction ?? transaction, policy});
-    const distance = getDistanceInMeters(transactionBackup ?? updatedTransaction ?? transaction, unit);
+    const distance = getDistanceInMeters(safeBackup ?? updatedTransaction ?? transaction, unit);
     const currency = transactionCurrency ?? CONST.CURRENCY.USD;
     const hasRequiredCompanyCardViolation = transactionViolations.some((violation) => violation.name === CONST.VIOLATIONS.COMPANY_CARD_REQUIRED);
     const isCustomUnitOutOfPolicy =

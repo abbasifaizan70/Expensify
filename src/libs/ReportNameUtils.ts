@@ -801,6 +801,7 @@ function computeChatThreadReportName(
     parentReportAction?: ReportAction,
     policyTags?: OnyxEntry<PolicyTagLists>,
     policy?: OnyxEntry<Policy>,
+    transactions?: OnyxCollection<Transaction>,
 ): string | undefined {
     if (!isChatThread(report)) {
         return undefined;
@@ -813,7 +814,10 @@ function computeChatThreadReportName(
     const isArchivedNonExpense = isArchivedNonExpenseReport(report, isArchived);
 
     if (!isEmptyObject(parentReportAction) && isTransactionThread(parentReportAction)) {
-        let formattedName = getTransactionReportName({translate, reportAction: parentReportAction});
+        // Forward the derived `transactions` snapshot so getTransactionReportName uses it instead of falling
+        // back to the legacy module-level `deprecatedAllTransactions` map (which can lag behind).
+        const transactionsArray = transactions ? (Object.values(transactions).filter(Boolean) as Transaction[]) : undefined;
+        let formattedName = getTransactionReportName({translate, reportAction: parentReportAction, transactions: transactionsArray});
 
         if (isArchivedNonExpense) {
             formattedName = generateArchivedReportName(formattedName);
@@ -949,6 +953,7 @@ function computeReportName({
         parentReportAction,
         policyTags,
         reportPolicy,
+        transactions,
     );
     if (chatThreadReportName) {
         return chatThreadReportName;

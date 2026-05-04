@@ -1,5 +1,7 @@
 import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
+import OnyxUtils from 'react-native-onyx/dist/OnyxUtils';
 import {getIsOffline} from '@libs/NetworkState';
+import {getOriginalMessage, isMoneyRequestAction} from '@libs/ReportActionsUtils';
 import {computeReportName} from '@libs/ReportNameUtils';
 import {generateIsEmptyReport, generateReportAttributes, hasVisibleReportFieldViolations, isArchivedReport, isValidReport} from '@libs/ReportUtils';
 import SidebarUtils from '@libs/SidebarUtils';
@@ -7,7 +9,7 @@ import createOnyxDerivedValueConfig from '@userActions/OnyxDerived/createOnyxDer
 import {hasKeyTriggeredCompute} from '@userActions/OnyxDerived/utils';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
-import type {PersonalDetailsList, Policy, ReportAttributesDerivedValue} from '@src/types/onyx';
+import type {PersonalDetailsList, Policy, ReportAttributesDerivedValue, Transaction} from '@src/types/onyx';
 
 let previousDisplayNames: Record<string, string | undefined> = {};
 let previousPersonalDetails: OnyxEntry<PersonalDetailsList> | undefined;
@@ -93,9 +95,17 @@ export default createOnyxDerivedValueConfig({
         ONYXKEYS.NETWORK,
     ],
     compute: (
-        [reports, preferredLocale, transactionViolations, reportActions, reportNameValuePairs, transactions, personalDetails, session, policies, policyTags],
+        [reports, preferredLocale, transactionViolations, reportActions, reportNameValuePairs, transactionsFromDeps, personalDetails, session, policies, policyTags],
         {currentValue, sourceValues},
     ) => {
+        // `dependencyValues[TRANSACTION]` (i.e. `transactionsFromDeps`) can lag one batch behind under
+        // a race where a sibling key (e.g. REPORT_ACTIONS) wins the per-promise dispatch in `Onyx.update`.
+        // The Onyx in-memory cache is updated inside `broadcastUpdate` immediately before each key's
+        // subscribers run, so reading the cache here gives us the freshest snapshot available regardless
+        // of which dependency callback triggered this compute pass.
+        const cachedTransactions = OnyxUtils.getCachedCollection<typeof ONYXKEYS.COLLECTION.TRANSACTION>(ONYXKEYS.COLLECTION.TRANSACTION) as OnyxCollection<Transaction>;
+        const transactions = cachedTransactions ?? transactionsFromDeps;
+
         // Read the in-memory offline state directly (NETWORK is a dependency so recompute still fires when it changes).
         const isOffline = getIsOffline();
         // Check if display names changed when personal details are updated
@@ -209,6 +219,31 @@ export default createOnyxDerivedValueConfig({
                     let transactionReportIDs: string[] = [];
                     if (transactionsUpdates) {
                         transactionReportIDs = Object.values(transactionsUpdates).map((transaction) => `${ONYXKEYS.COLLECTION.REPORT}${transaction?.reportID}`);
+
+                        // The transaction THREAD (a separate report whose title depends on the linked
+                        // transaction's amount/distance) is normally added to dataToIterate via
+                        // reportActionsUpdates -> childReportID. When REPORT_ACTIONS fires before
+                        // TRANSACTION in the same Onyx.update batch, the thread title gets computed
+                        // from a stale transaction snapshot. Explicitly enqueue the thread here so
+                        // the recompute triggered by the TRANSACTION callback overwrites that stale
+                        // value with one derived from the freshest transaction.
+                        const updatedTransactionIDs = new Set(Object.keys(transactionsUpdates).map((key) => key.replace(ONYXKEYS.COLLECTION.TRANSACTION, '')));
+                        if (updatedTransactionIDs.size > 0 && reportActions) {
+                            for (const actionsForReport of Object.values(reportActions)) {
+                                if (!actionsForReport) {
+                                    continue;
+                                }
+                                for (const action of Object.values(actionsForReport)) {
+                                    if (!isMoneyRequestAction(action) || !action.childReportID) {
+                                        continue;
+                                    }
+                                    const iouTransactionID = getOriginalMessage(action)?.IOUTransactionID;
+                                    if (iouTransactionID && updatedTransactionIDs.has(iouTransactionID)) {
+                                        transactionReportIDs.push(`${ONYXKEYS.COLLECTION.REPORT}${action.childReportID}`);
+                                    }
+                                }
+                            }
+                        }
                     }
                     // Also handle transaction violations updates by extracting transaction IDs and finding their reports
                     if (transactionViolationsUpdates) {

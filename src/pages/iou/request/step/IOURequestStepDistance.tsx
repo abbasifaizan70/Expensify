@@ -486,6 +486,9 @@ function IOURequestStepDistance({
                 });
             }
             transactionWasSaved.current = true;
+            // Clear the backup eagerly before navigating so MoneyRequestView reads `transactionBackup = null`
+            // on its very first render after navigation, rather than waiting on the asynchronous unmount cleanup.
+            removeBackupTransaction(transaction?.transactionID);
             navigateBack();
             return;
         }
