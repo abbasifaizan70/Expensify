@@ -1647,9 +1647,9 @@ describe('TransactionUtils', () => {
             expect(TransactionUtils.shouldShowExpenseBreakdown(transactions)).toBe(false);
         });
 
-        it('should return true when all transactions are non-reimbursable', () => {
+        it('should return false when all transactions are non-reimbursable', () => {
             const transactions = [generateTransaction({reimbursable: false}), generateTransaction({reimbursable: false})];
-            expect(TransactionUtils.shouldShowExpenseBreakdown(transactions)).toBe(true);
+            expect(TransactionUtils.shouldShowExpenseBreakdown(transactions)).toBe(false);
         });
 
         it('should return true when there are both reimbursable and non-reimbursable transactions', () => {

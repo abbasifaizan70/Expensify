@@ -164,6 +164,8 @@ function MoneyRequestReportTransactionList({
     const formattedCompanySpendAmount = convertToDisplayString(nonReimbursableSpend, report?.currency);
     const formattedBillableAmount = convertToDisplayString(billableTotal, report?.currency);
     const formattedTaxAmount = convertToDisplayString(taxTotal, report?.currency);
+    const hasMixedReimbursability = !!reimbursableSpend && !!nonReimbursableSpend;
+    const isOnlyNonReimbursable = !!nonReimbursableSpend && !reimbursableSpend;
     const shouldShowExpenseReportBreakDown = shouldShowExpenseBreakdown(transactions);
     const shouldShowBreakdown = shouldShowExpenseReportBreakDown || !!billableTotal || (!!taxTotal && isTaxEnabled);
     const transactionsWithoutPendingDelete = useMemo(() => transactions.filter((t) => !isTransactionPendingDelete(t)), [transactions]);
@@ -806,8 +808,8 @@ function MoneyRequestReportTransactionList({
                     {shouldShowBreakdown && (
                         <View style={[styles.dFlex, styles.alignItemsEnd, styles.gap2, styles.mb2, styles.flex1]}>
                             {[
-                                {text: 'cardTransactions.outOfPocket', value: formattedOutOfPocketAmount, shouldShow: !!nonReimbursableSpend},
-                                {text: 'cardTransactions.companySpend', value: formattedCompanySpendAmount, shouldShow: !!nonReimbursableSpend},
+                                {text: 'cardTransactions.outOfPocket', value: formattedOutOfPocketAmount, shouldShow: hasMixedReimbursability},
+                                {text: 'cardTransactions.companySpend', value: formattedCompanySpendAmount, shouldShow: hasMixedReimbursability},
                                 {text: 'common.billable', value: formattedBillableAmount, shouldShow: !!billableTotal},
                                 {text: 'common.tax', value: formattedTaxAmount, shouldShow: !!taxTotal && isTaxEnabled},
                             ]
@@ -853,6 +855,7 @@ function MoneyRequestReportTransactionList({
                             totalDisplaySpend={totalDisplaySpend}
                             report={report}
                             hasPendingAction={hasPendingAction}
+                            isOnlyNonReimbursable={isOnlyNonReimbursable}
                         />
                     </OfflineWithFeedback>
                 </View>

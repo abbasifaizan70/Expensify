@@ -31,6 +31,9 @@ type MoneyRequestReportTotalSpendProps = {
 
     /** Style for the text container of the total spend */
     textContainerStyle?: StyleProp<ViewStyle>;
+
+    /** Whether every expense on the report is non-reimbursable. When true, an inline "Non-reimbursable" label is appended to the total. */
+    isOnlyNonReimbursable?: boolean;
 };
 
 function MoneyRequestReportTotalSpend({
@@ -41,6 +44,7 @@ function MoneyRequestReportTotalSpend({
     report,
     hasPendingAction,
     textContainerStyle,
+    isOnlyNonReimbursable = false,
 }: MoneyRequestReportTotalSpendProps) {
     const {convertToDisplayString} = useCurrencyListActions();
     const styles = useThemeStyles();
@@ -65,6 +69,9 @@ function MoneyRequestReportTotalSpend({
                     <Text style={[styles.mr3, styles.textLabelSupporting]}>{translate('common.total')}</Text>
                     <Text style={[shouldUseNarrowLayout ? styles.mnw64p : styles.mnw100p, styles.textAlignRight, styles.textBold, hasPendingAction && styles.opacitySemiTransparent]}>
                         {convertToDisplayString(totalDisplaySpend, report?.currency)}
+                        {isOnlyNonReimbursable && (
+                            <Text style={[styles.textLabelSupporting, styles.textNormal]}>{` · ${translate('cardTransactions.companySpend')}`}</Text>
+                        )}
                     </Text>
                 </View>
             )}

@@ -2740,10 +2740,7 @@ function shouldShowExpenseBreakdown(transactions?: Transaction[]): boolean {
     if (!transactions || transactions.length === 0) {
         return false;
     }
-
-    // Show breakdown if there is ANY non-reimbursable expense.
-    // If there are no non-reimbursable expenses (i.e., all are reimbursable), do not show the breakdown.
-    return transactions.some((transaction) => !getReimbursable(transaction));
+    return transactions.some(getReimbursable) && transactions.some((transaction) => !getReimbursable(transaction));
 }
 
 /**

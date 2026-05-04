@@ -96,7 +96,8 @@ function MoneyReportView({
     const {billableTotal, taxTotal} = getBillableAndTaxTotal(report, transactions);
 
     const isTaxEnabled = isPolicyTaxEnabled(policy);
-    const shouldShowBreakdown = nonReimbursableSpend || !!billableTotal || (!!taxTotal && isTaxEnabled);
+    const hasMixedReimbursability = !!reimbursableSpend && !!nonReimbursableSpend;
+    const shouldShowBreakdown = hasMixedReimbursability || !!billableTotal || (!!taxTotal && isTaxEnabled);
     const formattedTotalAmount = convertToDisplayString(totalDisplaySpend, report?.currency);
     const formattedOutOfPocketAmount = convertToDisplayString(reimbursableSpend, report?.currency);
     const formattedCompanySpendAmount = convertToDisplayString(nonReimbursableSpend, report?.currency);
@@ -249,8 +250,8 @@ function MoneyReportView({
                         {!!shouldShowBreakdown && (
                             <>
                                 {[
-                                    {label: 'cardTransactions.outOfPocket', value: formattedOutOfPocketAmount, show: !!nonReimbursableSpend},
-                                    {label: 'cardTransactions.companySpend', value: formattedCompanySpendAmount, show: !!nonReimbursableSpend},
+                                    {label: 'cardTransactions.outOfPocket', value: formattedOutOfPocketAmount, show: hasMixedReimbursability},
+                                    {label: 'cardTransactions.companySpend', value: formattedCompanySpendAmount, show: hasMixedReimbursability},
                                     {label: 'common.billable', value: formattedBillableAmount, show: !!billableTotal},
                                     {label: 'common.tax', value: formattedTaxAmount, show: !!taxTotal && isTaxEnabled},
                                 ]

@@ -451,6 +451,9 @@ function MoneyRequestView({
     const shouldShowTax = isFromMergeTransaction ? !!transaction?.taxName : isTaxEnabled || shouldShowTaxDisabledAlert;
 
     let amountDescription = `${translate('iou.amount')}`;
+    if (transactionReimbursable === false) {
+        amountDescription += ` ${CONST.DOT_SEPARATOR} ${Str.UCFirst(translate('iou.nonReimbursable'))}`;
+    }
     let dateDescription = `${translate('common.date')}`;
 
     const {unit, rate, name: rateName} = DistanceRequestUtils.getRate({transaction: updatedTransaction ?? transaction, policy});
