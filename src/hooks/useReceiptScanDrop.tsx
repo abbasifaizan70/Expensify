@@ -3,8 +3,9 @@ import React, {useMemo} from 'react';
 import {setTransactionReport} from '@libs/actions/Transaction';
 import {navigateToParticipantPage} from '@libs/IOUUtils';
 import Navigation from '@libs/Navigation/Navigation';
+import {useCurrentReportIDState} from '@hooks/useCurrentReportID';
 import {hasOnlyPersonalPolicies as hasOnlyPersonalPoliciesUtil, isPaidGroupPolicy} from '@libs/PolicyUtils';
-import {generateReportID, getPolicyExpenseChat, isSelfDM} from '@libs/ReportUtils';
+import {generateReportID, getPolicyExpenseChat, isPolicyExpenseChat, isSelfDM} from '@libs/ReportUtils';
 import {shouldRestrictUserBillableActions} from '@libs/SubscriptionUtils';
 import type {ReceiptFile} from '@pages/iou/request/step/IOURequestStepScan/types';
 import {initMoneyRequest, setMoneyRequestParticipantsFromReport} from '@userActions/IOU';
@@ -29,6 +30,7 @@ function useReceiptScanDrop() {
     const isAnonymousUser = useIsAnonymousUser();
     const currentUserPersonalDetails = useCurrentUserPersonalDetails();
     const selfDMReport = useSelfDMReport();
+    const {currentReportID} = useCurrentReportIDState();
     const [userBillingGracePeriodEnds] = useOnyx(ONYXKEYS.COLLECTION.SHARED_NVP_PRIVATE_USER_BILLING_GRACE_PERIOD_END);
     const [ownerBillingGracePeriodEnd] = useOnyx(ONYXKEYS.NVP_PRIVATE_OWNER_BILLING_GRACE_PERIOD_END);
     const [amountOwed] = useOnyx(ONYXKEYS.NVP_PRIVATE_AMOUNT_OWED);
@@ -36,12 +38,15 @@ function useReceiptScanDrop() {
     const [currentDate] = useOnyx(ONYXKEYS.CURRENT_DATE);
     const [activePolicyID] = useOnyx(ONYXKEYS.NVP_ACTIVE_POLICY_ID);
     const [activePolicy] = useOnyx(`${ONYXKEYS.COLLECTION.POLICY}${activePolicyID}`);
+    const [currentReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${currentReportID}`);
+    const [currentReportPolicy] = useOnyx(`${ONYXKEYS.COLLECTION.POLICY}${currentReport?.policyID}`);
     const [personalPolicyID] = useOnyx(ONYXKEYS.PERSONAL_POLICY_ID);
     const [personalPolicy] = useOnyx(`${ONYXKEYS.COLLECTION.POLICY}${personalPolicyID}`);
     const [draftTransactionIDs] = useOnyx(ONYXKEYS.COLLECTION.TRANSACTION_DRAFT, {selector: validTransactionDraftIDsSelector});
 
     // Memoize the new report ID to avoid re-generating it on every render and cause the hook to change, which leads to performance issues.
     const newReportID = useMemo(() => generateReportID(), []);
+    const activeWorkspacePolicy = activePolicy ?? (isPolicyExpenseChat(currentReport) ? currentReportPolicy : undefined);
 
     const saveFileAndInitMoneyRequest = (files: FileObject[]) => {
         const initialTransaction = initMoneyRequest({
@@ -80,12 +85,12 @@ function useReceiptScanDrop() {
         }
 
         if (
-            isPaidGroupPolicy(activePolicy) &&
-            activePolicy?.isPolicyExpenseChatEnabled &&
-            !shouldRestrictUserBillableActions(activePolicy, ownerBillingGracePeriodEnd, userBillingGracePeriodEnds, amountOwed, currentUserPersonalDetails.accountID)
+            isPaidGroupPolicy(activeWorkspacePolicy) &&
+            activeWorkspacePolicy?.isPolicyExpenseChatEnabled &&
+            !shouldRestrictUserBillableActions(activeWorkspacePolicy, ownerBillingGracePeriodEnd, userBillingGracePeriodEnds, amountOwed, currentUserPersonalDetails.accountID)
         ) {
-            const shouldAutoReport = !!activePolicy?.autoReporting || !!personalPolicy?.autoReporting;
-            const report = shouldAutoReport ? getPolicyExpenseChat(currentUserPersonalDetails.accountID, activePolicy?.id) : selfDMReport;
+            const shouldAutoReport = !!activeWorkspacePolicy?.autoReporting || !!personalPolicy?.autoReporting;
+            const report = shouldAutoReport ? getPolicyExpenseChat(currentUserPersonalDetails.accountID, activeWorkspacePolicy?.id) : selfDMReport;
             const transactionReportID = isSelfDM(report) ? CONST.REPORT.UNREPORTED_REPORT_ID : report?.reportID;
             const iouTypeTrackOrSubmit = transactionReportID === CONST.REPORT.UNREPORTED_REPORT_ID ? CONST.IOU.TYPE.TRACK : CONST.IOU.TYPE.SUBMIT;
             const setParticipantsPromises = newReceiptFiles.map((receiptFile) => {

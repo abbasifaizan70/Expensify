@@ -61,6 +61,9 @@ function useReceiptDrop({reportID, report, shouldAddOrReplaceReceipt, transactio
             draftTransactionIDs,
         });
 
+        const setParticipantsPromises: Array<Promise<unknown>> = [];
+        let initialTransactionID = CONST.IOU.OPTIMISTIC_TRANSACTION_ID;
+
         for (const [index, file] of files.entries()) {
             const source = URL.createObjectURL(file as Blob);
             const newTransaction =
@@ -72,15 +75,21 @@ function useReceiptDrop({reportID, report, shouldAddOrReplaceReceipt, transactio
                           reportID,
                       });
             const newTransactionID = newTransaction?.transactionID ?? CONST.IOU.OPTIMISTIC_TRANSACTION_ID;
+            if (index === 0) {
+                initialTransactionID = newTransactionID;
+            }
             setMoneyRequestReceipt(newTransactionID, source, file.name ?? '', true, file.type);
-            setMoneyRequestParticipantsFromReport(newTransactionID, report, currentUserPersonalDetails.accountID);
+            setParticipantsPromises.push(setMoneyRequestParticipantsFromReport(newTransactionID, report, currentUserPersonalDetails.accountID));
         }
-        Navigation.navigate(
-            ROUTES.MONEY_REQUEST_STEP_CONFIRMATION.getRoute(
-                CONST.IOU.ACTION.CREATE,
-                isSelfDM(report) ? CONST.IOU.TYPE.TRACK : CONST.IOU.TYPE.SUBMIT,
-                CONST.IOU.OPTIMISTIC_TRANSACTION_ID,
-                reportID,
+
+        Promise.all(setParticipantsPromises).then(() =>
+            Navigation.navigate(
+                ROUTES.MONEY_REQUEST_STEP_CONFIRMATION.getRoute(
+                    CONST.IOU.ACTION.CREATE,
+                    isSelfDM(report) ? CONST.IOU.TYPE.TRACK : CONST.IOU.TYPE.SUBMIT,
+                    initialTransactionID,
+                    reportID,
+                ),
             ),
         );
     };
