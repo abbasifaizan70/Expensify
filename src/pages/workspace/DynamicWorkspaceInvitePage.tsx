@@ -89,14 +89,30 @@ function DynamicWorkspaceInvitePage({route, policy}: WorkspaceInvitePageProps) {
         // Convert InvitedEmailsToAccountIDs to OptionData[]
         // The draft stores login -> accountID mappings
         // Use getParticipantsOption to enrich with full user details
-        return Object.entries(invitedEmailsToAccountIDsDraft).map(([login, accountID]) => {
-            const participant = {
-                login,
-                accountID,
-                selected: true,
-            };
-            return getParticipantsOption(participant, personalDetails) as OptionData;
-        });
+        return Object.entries(invitedEmailsToAccountIDsDraft)
+            .map(([login, accountID]) => {
+                const normalizedLogin = login.toLowerCase().trim();
+                const numericAccountID = Number(accountID);
+                if (!normalizedLogin || !Number.isFinite(numericAccountID)) {
+                    return undefined;
+                }
+
+                const participant = {
+                    login: normalizedLogin,
+                    accountID: numericAccountID,
+                    selected: true,
+                };
+                const participantOption = getParticipantsOption(participant, personalDetails) as OptionData;
+                return {
+                    ...participantOption,
+                    login: participantOption.login || normalizedLogin,
+                    accountID: participantOption.accountID ?? numericAccountID,
+                    keyForList: participantOption.keyForList || `${normalizedLogin}_${numericAccountID}`,
+                    isSelected: true,
+                    selected: true,
+                };
+            })
+            .filter((option): option is OptionData => !!option);
     }, [invitedEmailsToAccountIDsDraft, personalDetails]);
 
     const {
@@ -170,16 +186,22 @@ function DynamicWorkspaceInvitePage({route, policy}: WorkspaceInvitePageProps) {
 
         const invitedEmailsToAccountIDs: InvitedEmailsToAccountIDs = {};
         for (const option of selectedOptions) {
-            const login = option.login ?? '';
-            const accountID = option.accountID ?? CONST.DEFAULT_NUMBER_ID;
-            if (!login.toLowerCase().trim() || !accountID) {
+            const login = option.login?.toLowerCase().trim() ?? '';
+            if (!login) {
                 continue;
             }
-            invitedEmailsToAccountIDs[login] = Number(accountID);
+
+            const realAccountID = Object.values(personalDetails ?? {}).find((personalDetail) => personalDetail?.login?.toLowerCase() === login)?.accountID;
+            const accountID = Number(realAccountID ?? option.accountID ?? CONST.DEFAULT_NUMBER_ID);
+            if (!Number.isFinite(accountID) || !accountID) {
+                continue;
+            }
+
+            invitedEmailsToAccountIDs[login] = accountID;
         }
         setWorkspaceInviteMembersDraft(route.params.policyID, invitedEmailsToAccountIDs);
         Navigation.navigate(createDynamicRoute(DYNAMIC_ROUTES.WORKSPACE_INVITE_MESSAGE.path));
-    }, [route.params.policyID, selectedOptions]);
+    }, [route.params.policyID, selectedOptions, personalDetails]);
 
     const [policyName, shouldShowAlertPrompt] = useMemo(() => [policy?.name ?? '', !isEmptyObject(policy?.errors)], [policy?.name, policy?.errors]);
 

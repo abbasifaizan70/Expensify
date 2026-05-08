@@ -78,6 +78,23 @@ function WorkspaceInviteMessageComponent({
     const [workspaceInviteMessageDraft, workspaceInviteMessageDraftResult] = useOnyx(`${ONYXKEYS.COLLECTION.WORKSPACE_INVITE_MESSAGE_DRAFT}${policyID}`);
     const [workspaceInviteRoleDraft = CONST.POLICY.ROLE.USER] = useOnyx(`${ONYXKEYS.COLLECTION.WORKSPACE_INVITE_ROLE_DRAFT}${policyID}`);
 
+    const sanitizedInvitedEmailsToAccountIDsDraft = useMemo(
+        () =>
+            Object.entries(invitedEmailsToAccountIDsDraft ?? {}).reduce(
+                (acc, [login, accountID]) => {
+                    const normalizedLogin = login.toLowerCase().trim();
+                    const numericAccountID = Number(accountID);
+                    if (!normalizedLogin || !Number.isFinite(numericAccountID)) {
+                        return acc;
+                    }
+                    acc[normalizedLogin] = numericAccountID;
+                    return acc;
+                },
+                {} as Record<string, number>,
+            ),
+        [invitedEmailsToAccountIDsDraft],
+    );
+
     const defaultApprover = getDefaultApprover(policy);
     const [approverDraft] = useOnyx(`${ONYXKEYS.COLLECTION.WORKSPACE_INVITE_APPROVER_DRAFT}${policyID}`);
     const workspaceInviteApproverDraft = approverDraft ?? defaultApprover;
@@ -94,7 +111,7 @@ function WorkspaceInviteMessageComponent({
     };
 
     const isOnyxLoading = isLoadingOnyxValue(workspaceInviteMessageDraftResult, invitedEmailsToAccountIDsDraftResult, formDataResult);
-    const personalDetailsOfInvitedEmails = getPersonalDetailsForAccountIDs(Object.values(invitedEmailsToAccountIDsDraft ?? {}), allPersonalDetails ?? {});
+    const personalDetailsOfInvitedEmails = getPersonalDetailsForAccountIDs(Object.values(sanitizedInvitedEmailsToAccountIDsDraft), allPersonalDetails ?? {});
     const memberNames = Object.values(personalDetailsOfInvitedEmails)
         .map((personalDetail) => {
             const displayName = getDisplayNameOrDefault(personalDetail, '', false);
@@ -105,7 +122,7 @@ function WorkspaceInviteMessageComponent({
             // We don't have login details for users who are not in the database yet
             // So we need to fallback to their login from the invitedEmailsToAccountIDsDraft
             const accountID = personalDetail.accountID;
-            const loginFromInviteMap = Object.entries(invitedEmailsToAccountIDsDraft ?? {}).find(([, id]) => id === accountID)?.[0];
+            const loginFromInviteMap = Object.entries(sanitizedInvitedEmailsToAccountIDsDraft).find(([, id]) => id === accountID)?.[0];
 
             return loginFromInviteMap;
         })
@@ -124,7 +141,7 @@ function WorkspaceInviteMessageComponent({
         if (isOnyxLoading) {
             return;
         }
-        if (!isEmptyObject(invitedEmailsToAccountIDsDraft)) {
+        if (!isEmptyObject(sanitizedInvitedEmailsToAccountIDsDraft)) {
             setWelcomeNote(getDefaultWelcomeNote());
             return;
         }
@@ -151,7 +168,7 @@ function WorkspaceInviteMessageComponent({
         // Please see https://github.com/Expensify/App/blob/main/README.md#Security for more details
         // See https://github.com/Expensify/App/blob/main/README.md#workspace, we set conditions about who can leave the workspace
         addMembersToWorkspace(
-            invitedEmailsToAccountIDsDraft ?? {},
+            sanitizedInvitedEmailsToAccountIDsDraft,
             `${welcomeNoteSubject}\n\n${welcomeNote}`,
             policy,
             policyMemberAccountIDs,
@@ -187,14 +204,14 @@ function WorkspaceInviteMessageComponent({
 
     const validate = (): FormInputErrors<typeof ONYXKEYS.FORMS.WORKSPACE_INVITE_MESSAGE_FORM> => {
         const errorFields: FormInputErrors<typeof ONYXKEYS.FORMS.WORKSPACE_INVITE_MESSAGE_FORM> = {};
-        if (isEmptyObject(invitedEmailsToAccountIDsDraft) && !isOnyxLoading) {
+        if (isEmptyObject(sanitizedInvitedEmailsToAccountIDsDraft) && !isOnyxLoading) {
             errorFields.welcomeMessage = translate('workspace.inviteMessage.inviteNoMembersError');
         }
         return errorFields;
     };
 
     const policyName = policy?.name;
-    const invitingMemberEmail = Object.keys(invitedEmailsToAccountIDsDraft ?? {}).at(0) ?? '';
+    const invitingMemberEmail = Object.keys(sanitizedInvitedEmailsToAccountIDsDraft).at(0) ?? '';
     const invitingMemberDetails = getPersonalDetailByEmail(invitingMemberEmail);
     const invitingMemberName = Str.removeSMSDomain(invitingMemberDetails?.displayName ?? '');
 
@@ -239,12 +256,12 @@ function WorkspaceInviteMessageComponent({
                     <View style={[styles.mv4, styles.justifyContentCenter, styles.alignItemsCenter]}>
                         <ReportActionAvatars
                             size={CONST.AVATAR_SIZE.LARGE}
-                            accountIDs={Object.values(invitedEmailsToAccountIDsDraft ?? {})}
+                            accountIDs={Object.values(sanitizedInvitedEmailsToAccountIDsDraft)}
                             horizontalStacking={{
                                 displayInRows: true,
                             }}
                             secondaryAvatarContainerStyle={styles.secondAvatarInline}
-                            invitedEmailsToAccountIDs={invitedEmailsToAccountIDsDraft}
+                            invitedEmailsToAccountIDs={sanitizedInvitedEmailsToAccountIDsDraft}
                             shouldUseCustomFallbackAvatar
                             shouldShowTooltip={shouldShowTooltip}
                         />
