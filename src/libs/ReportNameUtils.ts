@@ -814,8 +814,6 @@ function computeChatThreadReportName(
     const isArchivedNonExpense = isArchivedNonExpenseReport(report, isArchived);
 
     if (!isEmptyObject(parentReportAction) && isTransactionThread(parentReportAction)) {
-        // Forward the derived `transactions` snapshot so getTransactionReportName uses it instead of falling
-        // back to the legacy module-level `deprecatedAllTransactions` map (which can lag behind).
         const transactionsArray = transactions ? (Object.values(transactions).filter(Boolean) as Transaction[]) : undefined;
         let formattedName = getTransactionReportName({translate, reportAction: parentReportAction, transactions: transactionsArray});
 

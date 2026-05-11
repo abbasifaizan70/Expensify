@@ -532,10 +532,7 @@ function updateMoneyRequestDistance({
         // Don't sanitize waypoints here - keep all fields for Onyx optimistic data (e.g., keyForList)
         // Sanitization happens when building API params
         ...(waypoints && {waypoints}),
-        // Only include routes when the caller explicitly supplied a value. Otherwise getUpdatedTransaction
-        // would overwrite the optimistic clone's routes with `undefined` and getClearedPendingFields
-        // would emit a spurious `routes: null` entry into success/failure data.
-        ...(routes !== undefined && {routes}),
+        routes,
         ...(distance && {distance}),
         ...(odometerStart !== undefined && {odometerStart}),
         ...(odometerEnd !== undefined && {odometerEnd}),
