@@ -107,6 +107,22 @@ describe('SearchQueryUtils', () => {
             expect(result).toEqual(defaultQuery);
         });
 
+        test('uses provided default type when query does not include type', () => {
+            const userQuery = 'R00AbC12deFG';
+
+            const result = getQueryWithUpdatedValues(userQuery, false, CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT);
+
+            expect(result).toEqual('type:expense-report sortBy:date sortOrder:desc R00AbC12deFG');
+        });
+
+        test('preserves explicit type when provided default type differs', () => {
+            const userQuery = 'type:expense merchant:Uber';
+
+            const result = getQueryWithUpdatedValues(userQuery, false, CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT);
+
+            expect(result).toEqual(`${defaultQuery} merchant:Uber`);
+        });
+
         test('returns query with updated amounts', () => {
             const userQuery = 'foo test amount:20000';
 

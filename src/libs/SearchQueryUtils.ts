@@ -1859,8 +1859,26 @@ function traverseAndUpdatedQuery(queryJSON: SearchQueryJSON | Readonly<SearchQue
  * Returns new string query, after parsing it and traversing to update some filter values.
  * If there are any personal emails, it will try to substitute them with accountIDs
  */
-function getQueryWithUpdatedValues(query: string, shouldSkipAmountConversion = false) {
+function getQueryWithDefaultType(query: string, defaultType: SearchDataTypes) {
+    if (defaultType === CONST.SEARCH.DATA_TYPES.EXPENSE) {
+        return query;
+    }
+
     const queryJSON = buildSearchQueryJSON(query);
+    if (!queryJSON) {
+        return query;
+    }
+
+    const hasExplicitType = queryJSON.rawFilterList?.some((filter) => filter.key === CONST.SEARCH.SYNTAX_FILTER_KEYS.TYPE);
+    if (hasExplicitType) {
+        return query;
+    }
+
+    return query ? `type:${defaultType} ${query}` : `type:${defaultType}`;
+}
+
+function getQueryWithUpdatedValues(query: string, shouldSkipAmountConversion = false, defaultType: SearchDataTypes = CONST.SEARCH.DATA_TYPES.EXPENSE) {
+    const queryJSON = buildSearchQueryJSON(getQueryWithDefaultType(query, defaultType));
 
     if (!queryJSON) {
         Log.alert(`${CONST.ERROR.ENSURE_BUG_BOT} user query failed to parse`, {}, false);

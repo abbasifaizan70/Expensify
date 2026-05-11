@@ -119,7 +119,7 @@ function useSearchPageInput({queryJSON, onSearch, onSubmit}: UseSearchPageInputP
 
     function submitSearch(queryString: SearchQueryString, shouldSkipAmountConversion = false) {
         const queryWithSubstitutions = getQueryWithSubstitutions(queryString, autocompleteSubstitutions);
-        const updatedQuery = getQueryWithUpdatedValues(queryWithSubstitutions, shouldSkipAmountConversion);
+        const updatedQuery = getQueryWithUpdatedValues(queryWithSubstitutions, shouldSkipAmountConversion, queryJSON.type);
 
         if (!updatedQuery) {
             return;
