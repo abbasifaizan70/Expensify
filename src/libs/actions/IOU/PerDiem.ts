@@ -18,7 +18,7 @@ import {buildNextStepNew, buildOptimisticNextStep} from '@libs/NextStepUtils';
 import * as NumberUtils from '@libs/NumberUtils';
 import {addSMSDomainIfPhoneNumber} from '@libs/PhoneNumber';
 import {getPerDiemCustomUnit, getPerDiemRateCustomUnitRate} from '@libs/PolicyUtils';
-import {getReportActionHtml, getReportActionText} from '@libs/ReportActionsUtils';
+import {getOriginalMessage, getReportActionHtml, getReportActionText} from '@libs/ReportActionsUtils';
 import type {OptimisticIOUReportAction} from '@libs/ReportUtils';
 import {
     buildOptimisticChatReport,
@@ -993,22 +993,25 @@ function submitPerDiemExpense(submitPerDiemExpenseInformation: PerDiemExpenseInf
     };
 
     if (action === CONST.IOU.ACTION.SUBMIT && linkedTrackedExpenseReportAction && linkedTrackedExpenseReportID) {
+        const originalTransactionID = getOriginalMessage(linkedTrackedExpenseReportAction)?.IOUTransactionID;
         const linkedTrackedExpenseReport = getAllReports()?.[`${ONYXKEYS.COLLECTION.REPORT}${linkedTrackedExpenseReportID}`];
-        const linkedReportCleanupData = getDeleteTrackExpenseInformation(
+        const deleteInfo = getDeleteTrackExpenseInformation(
             linkedTrackedExpenseReport,
-            transaction.transactionID,
+            originalTransactionID,
             linkedTrackedExpenseReportAction,
             false,
+            true,
             false,
-            true,
             actionableWhisperReportActionID,
-            CONST.IOU.ACTION.SUBMIT,
-            true,
+            CONST.REPORT.ACTIONABLE_TRACK_EXPENSE_WHISPER_RESOLUTION.NOTHING,
+            false,
         );
 
-        onyxData.optimisticData?.push(...linkedReportCleanupData.optimisticData);
-        onyxData.successData?.push(...linkedReportCleanupData.successData);
-        onyxData.failureData?.push(...linkedReportCleanupData.failureData);
+        API.write(WRITE_COMMANDS.DELETE_MONEY_REQUEST, deleteInfo.parameters, {
+            optimisticData: deleteInfo.optimisticData,
+            successData: deleteInfo.successData,
+            failureData: deleteInfo.failureData,
+        });
     }
 
     if (shouldPlaySoundParam) {
