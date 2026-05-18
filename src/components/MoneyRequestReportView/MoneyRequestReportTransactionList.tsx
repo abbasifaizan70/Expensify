@@ -506,7 +506,7 @@ function MoneyRequestReportTransactionList({
         };
     }, [transactions]);
 
-    const isEmptyTransactions = isEmpty(transactions);
+    const isEmptyTransactions = isEmpty(transactions) && (report?.total ?? 0) === 0;
 
     const handleLongPress = useCallback(
         (transactionID: string) => {

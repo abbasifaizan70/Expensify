@@ -100,8 +100,8 @@ function ReportActionsView({reportID, onLayout}: ReportActionsViewProps) {
 
     const {transactions: reportTransactions} = useTransactionsAndViolationsForReport(reportID);
     const reportTransactionIDs = useMemo(
-        () => getAllNonDeletedTransactions(reportTransactions, allReportActions ?? []).map((transaction) => transaction.transactionID),
-        [reportTransactions, allReportActions],
+        () => getAllNonDeletedTransactions(reportTransactions, allReportActions ?? [], isOffline, true).map((transaction) => transaction.transactionID),
+        [reportTransactions, allReportActions, isOffline],
     );
 
     useEffect(() => {

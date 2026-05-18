@@ -653,7 +653,7 @@ function MoneyRequestReportActionsList({onLayout}: MoneyRequestReportListProps) 
         return numToRender || undefined;
     }, [styles.chatItem.paddingBottom, styles.chatItem.paddingTop, windowHeight, linkedReportActionID]);
 
-    const isReportEmpty = isEmpty(visibleReportActions) && isEmpty(transactions) && !showReportActionsLoadingState;
+    const isReportEmpty = isEmpty(visibleReportActions) && isEmpty(transactions) && !showReportActionsLoadingState && (report?.total ?? 0) === 0;
     // hasDeferredWriteForReport is non-reactive (reads a module-level Map, not tracked by React).
     // This is intentional: we only check on the initial render after the RHP dismisses.
     // Once the deferred write flushes and createTransaction runs, Onyx updates make

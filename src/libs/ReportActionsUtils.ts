@@ -1823,6 +1823,11 @@ const isIOUActionMatchingTransactionList = (
     }
 
     const {IOUTransactionID} = getOriginalMessage(action) ?? {};
+
+    if (reportTransactionIDs.length === 0) {
+        return !!IOUTransactionID;
+    }
+
     return !!IOUTransactionID && reportTransactionIDs.includes(IOUTransactionID);
 };
 

@@ -114,7 +114,9 @@ function IOURequestStepCategory({
         (isReportInGroupPolicy(report) || isGroupPolicy(policy?.type ?? '')) &&
         // The transactionCategory can be an empty string, so to maintain the logic we'd like to keep it in this shape until utils refactor
 
-        (!!categoryForDisplay || hasEnabledOptions(Object.values(policyCategories ?? {})));
+        (!!categoryForDisplay ||
+            hasEnabledOptions(Object.values(policyCategories ?? {})) ||
+            (!!policy?.areCategoriesEnabled && !!transaction?.transactionID));
 
     const shouldShowNotFoundPage = useShowNotFoundPageInIOUStep(action, iouType, reportActionID, report, transaction);
 
@@ -127,7 +129,7 @@ function IOURequestStepCategory({
     };
     const {isOffline} = useNetwork({onReconnect: fetchData});
     const isLoading = !isOffline && policyCategories === undefined;
-    const shouldShowEmptyState = policyCategories !== undefined && !shouldShowCategory;
+    const shouldShowEmptyState = policyCategories !== undefined && !shouldShowCategory && isCategoryMissing(transactionCategory);
     const shouldShowOfflineView = policyCategories === undefined && isOffline;
     const reasonAttributes: SkeletonSpanReasonAttributes = {
         context: 'IOURequestStepCategory',

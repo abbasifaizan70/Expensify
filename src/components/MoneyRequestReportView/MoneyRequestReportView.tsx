@@ -158,7 +158,7 @@ function MoneyRequestReportView({report, reportLoadingState, shouldDisplayReport
 
     const shouldShowOpenReportLoadingSkeleton = !!(isLoadingInitialReportActions && reportActions.length === 0 && !isOffline) || shouldWaitForTransactions;
 
-    const isEmptyTransactionReport = visibleTransactions?.length === 0 && transactionThreadReportID === undefined;
+    const isEmptyTransactionReport = visibleTransactions?.length === 0 && transactionThreadReportID === undefined && (report?.total ?? 0) === 0;
     const shouldDisplayMoneyRequestActionsList = !!isEmptyTransactionReport || shouldDisplayReportTableView(report, visibleTransactions ?? []);
 
     const [transactionThreadReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${transactionThreadReportID}`);

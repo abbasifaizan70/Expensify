@@ -140,7 +140,7 @@ function MoneyRequestReportPreviewContent({
     const lastTransaction = transactions?.at(0);
     const shouldShowSkeleton = shouldShowLoading && transactions.length === 0;
     const shouldShowAccessPlaceHolder = !iouReport && !shouldShowLoading;
-    const shouldShowEmptyPlaceholder = transactions.length === 0 && !shouldShowLoading;
+    const shouldShowEmptyPlaceholder = transactions.length === 0 && !shouldShowLoading && (iouReport?.total ?? 0) === 0;
     const shouldShowPreviewPlaceholder = shouldShowAccessPlaceHolder || shouldShowEmptyPlaceholder;
     const showStatusAndSkeleton = !shouldShowEmptyPlaceholder;
     // Empty/access placeholders do not depend on measured carousel width, so we can show them immediately
@@ -215,8 +215,8 @@ function MoneyRequestReportPreviewContent({
     const isPolicyExpenseChat = isPolicyExpenseChatReportUtils(chatReport);
     const isInvoiceRoom = isInvoiceRoomReportUtils(chatReport);
     const isTripRoom = isTripRoomReportUtils(chatReport);
-
     const numberOfRequests = transactions?.length ?? 0;
+
     const transactionsWithReceipts = getTransactionsWithReceipts(iouReportID);
     const numberOfPendingRequests = transactionsWithReceipts.filter((transaction) => isPending(transaction) && isManagedCardTransaction(transaction)).length;
 

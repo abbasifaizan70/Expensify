@@ -406,6 +406,10 @@ describe('ReportActionsUtils', () => {
         it('returns false if IOUTransactionID does not match any provided reportTransactionIDs', () => {
             expect(isIOUActionMatchingTransactionList(mockIOUAction, ['123', '124'])).toBeFalsy();
         });
+
+        it('returns true if reportTransactionIDs is empty but action has IOUTransactionID', () => {
+            expect(isIOUActionMatchingTransactionList(mockIOUAction, [])).toBeTruthy();
+        });
     });
 
     describe('getOneTransactionThreadReportAction', () => {
