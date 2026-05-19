@@ -97,7 +97,10 @@ type MoneyRequestReportPreviewContentProps = MoneyRequestReportPreviewContentOny
         renderTransactionItem: ListRenderItem<Transaction>;
 
         /** Callback called when the whole preview is pressed */
-        onPress: () => void;
+        onPress?: () => void;
+
+        /** Callback called when the view button is pressed */
+        openReportFromPreview: () => void;
 
         /** IDs of newly added transactions */
         newTransactionIDs?: Set<string>;

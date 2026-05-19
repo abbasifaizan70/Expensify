@@ -31,7 +31,6 @@ import useTheme from '@hooks/useTheme';
 import useThemeStyles from '@hooks/useThemeStyles';
 import ControlSelection from '@libs/ControlSelection';
 import {canUseTouchScreen} from '@libs/DeviceCapabilities';
-import Navigation from '@libs/Navigation/Navigation';
 import TransitionTracker from '@libs/Navigation/TransitionTracker';
 import {getInvoicePayerName, getReportName} from '@libs/ReportNameUtils';
 import {
@@ -53,7 +52,6 @@ import {
     isTripRoom as isTripRoomReportUtils,
 } from '@libs/ReportUtils';
 import shouldAdjustScroll from '@libs/shouldAdjustScroll';
-import {startSpan} from '@libs/telemetry/activeSpans';
 import {getPendingSubmitFollowUpAction} from '@libs/telemetry/submitFollowUpAction';
 import type {SkeletonSpanReasonAttributes} from '@libs/telemetry/useSkeletonSpan';
 import {compareByRBR} from '@libs/TransactionPreviewUtils';
@@ -63,7 +61,6 @@ import variables from '@styles/variables';
 import CONST from '@src/CONST';
 import type {TranslationPaths} from '@src/languages/types';
 import ONYXKEYS from '@src/ONYXKEYS';
-import ROUTES from '@src/ROUTES';
 import type {ReportAttributesDerivedValue, Transaction} from '@src/types/onyx';
 import type {PaymentMethodType} from '@src/types/onyx/OriginalMessage';
 import AccessMoneyRequestReportPreviewPlaceHolder from './AccessMoneyRequestReportPreviewPlaceHolder';
@@ -107,6 +104,7 @@ function MoneyRequestReportPreviewContent({
     shouldDisplayContextMenu = true,
     shouldShowBorder = false,
     onPress,
+    openReportFromPreview,
     forwardedFSClass,
     originalReportID,
 }: MoneyRequestReportPreviewContentProps) {
@@ -509,28 +507,6 @@ function MoneyRequestReportPreviewContent({
         }
         setOptimisticIndex(undefined);
     }, [carouselTransactions.length, currentIndex, currentVisibleItems, currentVisibleItems.length, optimisticIndex, visibleItemsOnEndCount]);
-
-    const openReportFromPreview = useCallback(() => {
-        if (!iouReportID) {
-            return;
-        }
-        startSpan(`${CONST.TELEMETRY.SPAN_OPEN_REPORT}_${iouReportID}`, {
-            name: 'MoneyRequestReportPreviewContent',
-            op: CONST.TELEMETRY.SPAN_OPEN_REPORT,
-        });
-        // Small screens navigate to full report view since super wide RHP
-        // is not available on narrow layouts and would break the navigation logic.
-        if (isSmallScreenWidth) {
-            Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(iouReportID, undefined, undefined, Navigation.getActiveRoute()));
-        } else {
-            Navigation.navigate(
-                ROUTES.EXPENSE_REPORT_RHP.getRoute({
-                    reportID: iouReportID,
-                    backTo: Navigation.getActiveRoute(),
-                }),
-            );
-        }
-    }, [iouReportID, isSmallScreenWidth]);
 
     const isReportDeleted = action?.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE;
 

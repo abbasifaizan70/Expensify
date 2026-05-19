@@ -39,7 +39,7 @@ type ReportPreviewActionButtonProps = {
     startSubmittingAnimation: () => void;
     onPaymentOptionsShow?: () => void;
     onPaymentOptionsHide?: () => void;
-    openReportFromPreview: () => void;
+    openReportFromPreview?: () => void;
     onHoldMenuOpen: (requestType: string, paymentType?: PaymentMethodType, canPay?: boolean) => void;
     transactionPreviewCarouselWidth: number;
 };
@@ -141,7 +141,17 @@ function ReportPreviewActionButton({
         reportMetadata: iouReportMetadata,
     });
 
-    const renderButton = () => {
+    const shouldShowViewButton = transactions.length > 1 && reportPreviewAction !== CONST.REPORT.REPORT_PREVIEW_ACTIONS.VIEW;
+
+    const renderViewButton = () => (
+        <Button
+            text={translate('common.view')}
+            onPress={openReportFromPreview}
+            sentryLabel={CONST.SENTRY_LABEL.REPORT_PREVIEW.VIEW_BUTTON}
+        />
+    );
+
+    const renderPrimaryButton = () => {
         if (reportPreviewAction === CONST.REPORT.REPORT_PREVIEW_ACTIONS.SUBMIT) {
             return (
                 <SubmitActionButton
@@ -228,16 +238,19 @@ function ReportPreviewActionButton({
             );
         }
 
-        return (
-            <Button
-                text={translate('common.view')}
-                onPress={openReportFromPreview}
-                sentryLabel={CONST.SENTRY_LABEL.REPORT_PREVIEW.VIEW_BUTTON}
-            />
-        );
+        return renderViewButton();
     };
 
-    return <View style={[buttonMaxWidth, styles.flex1, {height: variables.h40}]}>{renderButton()}</View>;
+    if (shouldShowViewButton) {
+        return (
+            <View style={[styles.flexRow, styles.gap2, styles.flex1, buttonMaxWidth, {height: variables.h40}]}>
+                <View style={styles.flex1}>{renderPrimaryButton()}</View>
+                <View style={styles.flex1}>{renderViewButton()}</View>
+            </View>
+        );
+    }
+
+    return <View style={[buttonMaxWidth, styles.flex1, {height: variables.h40}]}>{renderPrimaryButton()}</View>;
 }
 
 export default ReportPreviewActionButton;

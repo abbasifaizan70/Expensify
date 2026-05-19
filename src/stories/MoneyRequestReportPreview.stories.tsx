@@ -177,6 +177,8 @@ function Template(props: MoneyRequestReportPreviewContentProps, {parameters}: {p
                         onWrapperLayout={onWrapperLayout}
                         currentWidth={widths.currentWidth}
                         renderTransactionItem={renderItem}
+                        onPress={() => undefined}
+                        openReportFromPreview={() => undefined}
                     />
                 </View>
             </ThemeStylesProvider>

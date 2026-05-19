@@ -3,6 +3,7 @@ import React, {useCallback, useMemo, useRef, useState} from 'react';
 import type {LayoutChangeEvent} from 'react-native';
 import {usePersonalDetails} from '@components/OnyxListItemProvider';
 import TransactionPreview from '@components/ReportActionItem/TransactionPreview';
+import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useNewTransactions from '@hooks/useNewTransactions';
 import useOnyx from '@hooks/useOnyx';
 import usePolicy from '@hooks/usePolicy';
@@ -23,6 +24,7 @@ import ROUTES from '@src/ROUTES';
 import {hasOnceLoadedReportActionsSelector} from '@src/selectors/ReportMetaData';
 import type {Transaction} from '@src/types/onyx';
 import MoneyRequestReportPreviewContent from './MoneyRequestReportPreviewContent';
+import navigateToExpenseFromReportPreview from './navigateToExpenseFromReportPreview';
 import type {MoneyRequestReportPreviewProps} from './types';
 
 function MoneyRequestReportPreview({
@@ -44,6 +46,9 @@ function MoneyRequestReportPreview({
     const StyleUtils = useStyleUtils();
     // eslint-disable-next-line rulesdir/prefer-shouldUseNarrowLayout-instead-of-isSmallScreenWidth
     const {shouldUseNarrowLayout, isSmallScreenWidth} = useResponsiveLayout();
+    const personalDetails = useCurrentUserPersonalDetails();
+    const [introSelected] = useOnyx(ONYXKEYS.NVP_INTRO_SELECTED);
+    const [betas] = useOnyx(ONYXKEYS.BETAS);
     const personalDetailsList = usePersonalDetails();
     const [chatReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${chatReportID}`);
     const invoiceReceiverPolicyID = chatReport?.invoiceReceiver && 'policyID' in chatReport.invoiceReceiver ? chatReport.invoiceReceiver.policyID : undefined;
@@ -117,6 +122,30 @@ function MoneyRequestReportPreview({
             Navigation.navigate(ROUTES.EXPENSE_REPORT_RHP.getRoute({reportID: iouReportID, backTo: Navigation.getActiveRoute()}));
         }
     }, [iouReportID, isSmallScreenWidth]);
+
+    const hasMultipleExpenses = transactions.length > 1;
+    const siblingTransactionIDs = useMemo(() => transactions.map((transaction) => transaction.transactionID), [transactions]);
+
+    const openExpenseFromPreview = useCallback(
+        (transaction: Transaction) => {
+            if (contextMenuRef.current?.isContextMenuOpening) {
+                return;
+            }
+
+            navigateToExpenseFromReportPreview({
+                transaction,
+                iouReport,
+                siblingTransactionIDs,
+                isSmallScreenWidth,
+                introSelected,
+                currentUserLogin: personalDetails.email ?? '',
+                currentUserAccountID: personalDetails.accountID,
+                betas,
+            });
+        },
+        [iouReport, siblingTransactionIDs, isSmallScreenWidth, introSelected, personalDetails.email, personalDetails.accountID, betas],
+    );
+
     const [hasOnceLoadedReportActions] = useOnyx(`${ONYXKEYS.COLLECTION.RAM_ONLY_REPORT_LOADING_STATE}${chatReportID}`, {
         selector: hasOnceLoadedReportActionsSelector,
     });
@@ -142,7 +171,7 @@ function MoneyRequestReportPreview({
             transactionPreviewWidth={reportPreviewStyles.transactionPreviewCarouselStyle.width}
             transactionID={item.transactionID}
             reportPreviewAction={action}
-            onPreviewPressed={openReportFromPreview}
+            onPreviewPressed={hasMultipleExpenses ? () => openExpenseFromPreview(item) : openReportFromPreview}
             shouldShowPayerAndReceiver={shouldShowPayerAndReceiver}
             shouldHighlight={!!newTransactionIDs?.has(item.transactionID)}
             originalReportID={originalReportID}
@@ -175,7 +204,8 @@ function MoneyRequestReportPreview({
             currentWidth={widths.currentWidth}
             reportPreviewStyles={reportPreviewStyles}
             shouldDisplayContextMenu={shouldDisplayContextMenu}
-            onPress={openReportFromPreview}
+            onPress={hasMultipleExpenses ? undefined : openReportFromPreview}
+            openReportFromPreview={openReportFromPreview}
             shouldShowBorder={shouldShowBorder}
             forwardedFSClass={CONST.FULLSTORY.CLASS.UNMASK}
             originalReportID={originalReportID}
