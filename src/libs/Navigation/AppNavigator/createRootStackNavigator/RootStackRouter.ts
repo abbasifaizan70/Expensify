@@ -1,5 +1,5 @@
 import {CommonActions, StackRouter} from '@react-navigation/native';
-import type {RouterConfigOptions, StackActionType, StackNavigationState} from '@react-navigation/native';
+import type {NavigationState, PartialState, RouterConfigOptions, StackActionType, StackNavigationState} from '@react-navigation/native';
 import type {ParamListBase} from '@react-navigation/routers';
 import {createGuardContext, evaluateGuards} from '@libs/Navigation/guards';
 import getAdaptedStateFromPath from '@libs/Navigation/helpers/getAdaptedStateFromPath';
@@ -71,6 +71,15 @@ function isPreloadAction(action: RootStackNavigatorAction): action is PreloadAct
     return action.type === CONST.NAVIGATION.ACTION_TYPE.PRELOAD;
 }
 
+// Guard REDIRECTs whose target is one of these modal navigators should preserve the
+// existing fullscreen route underneath (so a deep-linked report survives onboarding).
+// Other REDIRECT targets keep the original behavior of fully replacing the stack.
+const MODAL_GUARD_REDIRECT_TARGETS = new Set<string>([NAVIGATORS.ONBOARDING_MODAL_NAVIGATOR, NAVIGATORS.MIGRATED_USER_MODAL_NAVIGATOR]);
+
+function isModalGuardRedirectTarget(name: string) {
+    return MODAL_GUARD_REDIRECT_TARGETS.has(name);
+}
+
 /**
  * Evaluates navigation guards and handles BLOCK/REDIRECT results
  *
@@ -101,10 +110,23 @@ function handleNavigationGuards(
             return null;
         }
 
+        const isModalRedirect = redirectState.routes.some((route) => isModalGuardRedirectTarget(route.name));
+
+        let resetRoutes: typeof redirectState.routes = redirectState.routes;
+        if (isModalRedirect) {
+            const redirectRoute = redirectState.routes.at(-1);
+            // findLast — not find — so a freshly-pushed deep-linked report wins over an older HOME tab.
+            // RIGHT_MODAL_NAVIGATOR (SignIn RHP, etc.) is NOT a fullscreen, so it cannot leak into the
+            // post-reset stack alongside the new modal — preventing the "two Expensify logos" regression (#86258).
+            const existingFullScreenRoute = state.routes.findLast((route) => isFullScreenName(route.name));
+
+            resetRoutes = existingFullScreenRoute && redirectRoute ? ([existingFullScreenRoute, redirectRoute] as typeof redirectState.routes) : redirectState.routes;
+        }
+
         const resetAction = CommonActions.reset({
-            index: redirectState.index ?? redirectState.routes.length - 1,
-            routes: redirectState.routes,
-        });
+            index: resetRoutes.length - 1,
+            routes: resetRoutes,
+        } as PartialState<NavigationState>);
 
         return stackRouter.getStateForAction(state, resetAction, configOptions);
     }

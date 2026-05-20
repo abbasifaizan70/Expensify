@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef} from 'react';
 import HeaderWithBackButton from '@components/HeaderWithBackButton';
+import {useInitialURLState} from '@components/InitialURLContextProvider';
 import {useSession} from '@components/OnyxListItemProvider';
 import ScreenWrapper from '@components/ScreenWrapper';
 import useAndroidBackButtonHandler from '@hooks/useAndroidBackButtonHandler';
@@ -10,6 +11,7 @@ import {openApp} from '@libs/actions/App';
 import {isMobileSafari} from '@libs/Browser';
 import Navigation from '@libs/Navigation/Navigation';
 import {waitForIdle} from '@libs/Network/SequentialQueue';
+import {getReportIDFromLink} from '@libs/ReportUtils';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
@@ -24,6 +26,7 @@ function SignInModal() {
     const session = useSession();
     const [isLoadingApp] = useOnyx(ONYXKEYS.IS_LOADING_APP);
     const hasSignedInRef = useRef(false);
+    const {initialURL} = useInitialURLState();
     // Use of SignInPageWrapped (with shouldEnableMaxHeight prop in SignInPageWrapper) is a workaround for Safari not supporting interactive-widget=resizes-content.
     // This allows better scrolling experience after keyboard shows for modals with input, that are larger than remaining screen height.
     // More info https://github.com/Expensify/App/pull/62799#issuecomment-2943136220.
@@ -58,8 +61,19 @@ function SignInModal() {
         }
 
         Navigation.dismissModal();
+
+        // If the user originally deep-linked to a report (e.g. /r/<id>), the report is already
+        // the underlying fullscreen route in the navigation state. Pushing HOME here would push HOME
+        // on top of it, and the OnboardingGuard REDIRECT preserve-logic would then carry HOME — not the
+        // report — under the OnboardingModal, losing the deep link (issue #85242). Skip HOME only in
+        // that case so non-report flows (e.g. /concierge cold-start) keep their existing back-stack
+        // and don't regress #90303.
+        if (getReportIDFromLink(initialURL ?? null)) {
+            return;
+        }
+
         Navigation.navigate(ROUTES.HOME);
-    }, [isLoadingApp]);
+    }, [isLoadingApp, initialURL]);
 
     return (
         <ScreenWrapper

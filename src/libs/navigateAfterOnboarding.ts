@@ -11,7 +11,7 @@ import SidePanelActions from './actions/SidePanel';
 import {setOnboardingRHPVariant} from './actions/Welcome';
 import shouldOpenOnAdminRoom from './Navigation/helpers/shouldOpenOnAdminRoom';
 import Navigation from './Navigation/Navigation';
-import {findLastAccessedReport, isConciergeChatReport, isSelfDM} from './ReportUtils';
+import {findLastAccessedReport, getReportIDFromLink, isConciergeChatReport, isSelfDM} from './ReportUtils';
 import type {ArchivedReportsIDSet} from './SearchUIUtils';
 
 let onboardingRHPVariant: OnyxEntry<OnboardingRHPVariant>;
@@ -67,8 +67,20 @@ function navigateAfterOnboarding(
     onboardingAdminsChatReportID?: string,
     shouldPreventOpenAdminRoom = false,
     variantOverride?: OnboardingRHPVariant | null,
+    initialURL?: string | null,
 ) {
     setDisableDismissOnEscape(false);
+
+    // If the user originally deep-linked to a specific report (e.g. /r/<id>) while signed out,
+    // honor that destination unconditionally — it represents the user's explicit intent and
+    // outranks any onboarding-flow default destination (admins room, Concierge RHP variant, etc.).
+    // This is the fix for issue #85242. We check this first so it wins over the variant branches
+    // below (Track-Expenses-With-Concierge, shouldOpenRHPVariant) that would otherwise return early.
+    const deepLinkReportID = getReportIDFromLink(initialURL ?? null);
+    if (deepLinkReportID) {
+        Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(deepLinkReportID));
+        return;
+    }
 
     // On mobile (small screen), Track workspace admins with the trackExpensesWithConcierge variant
     // should navigate directly to the Concierge DM (which contains onboarding tasks).
@@ -96,10 +108,13 @@ function navigateAfterOnboarding(
     );
     if (reportID) {
         Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(reportID));
-    } else {
-        // Navigate to home to trigger guard evaluation
-        Navigation.navigate(ROUTES.HOME);
+        return;
     }
+
+    // Default fallback — kept intentionally so non-report deep links (e.g. /concierge cold-start
+    // with the Track-Expenses-With-Concierge variant) still have HOME under the destination,
+    // preserving the back-stack and avoiding regression #90303.
+    Navigation.navigate(ROUTES.HOME);
 }
 
 function navigateAfterOnboardingWithMicrotaskQueue(
@@ -111,6 +126,7 @@ function navigateAfterOnboardingWithMicrotaskQueue(
     onboardingAdminsChatReportID?: string,
     shouldPreventOpenAdminRoom = false,
     variantOverride?: OnboardingRHPVariant | null,
+    initialURL?: string | null,
 ) {
     Navigation.dismissModal();
     Navigation.setNavigationActionToMicrotaskQueue(() => {
@@ -123,6 +139,7 @@ function navigateAfterOnboardingWithMicrotaskQueue(
             onboardingAdminsChatReportID,
             shouldPreventOpenAdminRoom,
             variantOverride,
+            initialURL,
         );
     });
 }

@@ -1,5 +1,6 @@
 import {useCallback, useMemo} from 'react';
 import type {OnyxCollection} from 'react-native-onyx';
+import {useInitialURLState} from '@components/InitialURLContextProvider';
 import isSidePanelReportSupported from '@components/SidePanel/isSidePanelReportSupported';
 import Log from '@libs/Log';
 import {navigateAfterOnboardingWithMicrotaskQueue} from '@libs/navigateAfterOnboarding';
@@ -52,6 +53,7 @@ function useAutoCreateTrackWorkspace() {
     const [onboardingValues] = useOnyx(ONYXKEYS.NVP_ONBOARDING);
     const archivedReportsIdSet = useArchivedReportsIdSet();
     const {isBetaEnabled} = usePermissions();
+    const {initialURL} = useInitialURLState();
 
     const mergedAccountConciergeReportID = !onboardingValues?.shouldRedirectToClassicAfterMerge && onboardingValues?.shouldValidate ? conciergeChatReportID : undefined;
 
@@ -126,6 +128,7 @@ function useAutoCreateTrackWorkspace() {
                     mergedAccountConciergeReportID,
                     false,
                     rhpVariant,
+                    initialURL,
                 );
             }
         },
@@ -151,6 +154,7 @@ function useAutoCreateTrackWorkspace() {
             conciergeChatReportID,
             archivedReportsIdSet,
             mergedAccountConciergeReportID,
+            initialURL,
         ],
     );
 
