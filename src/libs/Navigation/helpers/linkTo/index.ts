@@ -1,7 +1,6 @@
 import {getActionFromState} from '@react-navigation/core';
 import type {NavigationContainerRef, NavigationState, PartialState} from '@react-navigation/native';
 import {CommonActions, findFocusedRoute} from '@react-navigation/native';
-import {Platform} from 'react-native';
 import {getMatchingFullScreenRoute, isFullScreenName} from '@libs/Navigation/helpers/getAdaptedStateFromPath';
 import getStateFromPath from '@libs/Navigation/helpers/getStateFromPath';
 import normalizePath from '@libs/Navigation/helpers/normalizePath';
@@ -189,25 +188,9 @@ export default function linkTo(navigation: NavigationContainerRef<RootNavigatorP
         action.type = CONST.NAVIGATION.ACTION_TYPE.PUSH;
     }
 
-<<<<<<< Updated upstream
     // When we link to a report action in the current report, we want to push instead of replace so that back navigation
     // works naturally.
     else if (isNavigatingToReportActionWithinSameReport(currentFocusedRoute, focusedRouteFromPath)) {
-=======
-    // On native, when we link to a report action in the current report, update the route params in-place
-    // so the message list scrolls to the linked message without pushing a duplicate screen onto the stack.
-    // On web we keep the PUSH so the browser back button works naturally.
-    else if (isNavigatingToReportActionWithinSameReport(currentFocusedRoute, focusedRouteFromPath)) {
-        const newParams = focusedRouteFromPath?.params as ReportsSplitNavigatorParamList[typeof SCREENS.REPORT] | undefined;
-        const currentRouteKey = currentFocusedRoute.key;
-        if (Platform.OS !== 'web' && currentRouteKey && newParams?.reportActionID) {
-            navigation.dispatch({
-                ...CommonActions.setParams({reportActionID: newParams.reportActionID}),
-                source: currentRouteKey,
-            });
-            return;
-        }
->>>>>>> Stashed changes
         action.type = CONST.NAVIGATION.ACTION_TYPE.PUSH;
     }
 
