@@ -6,6 +6,7 @@ import useAncestors from '@hooks/useAncestors';
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useDelegateAccountID from '@hooks/useDelegateAccountID';
 import useIsInSidePanel from '@hooks/useIsInSidePanel';
+import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
 import useShortMentionsList from '@hooks/useShortMentionsList';
 import {addAttachmentWithComment, addComment} from '@libs/actions/Report';
@@ -28,6 +29,7 @@ function useComposerSubmit(reportID: string) {
     const currentUserPersonalDetails = useCurrentUserPersonalDetails();
     const personalDetails = usePersonalDetails();
     const {availableLoginsList} = useShortMentionsList();
+    const {formatPhoneNumber} = useLocalize();
     const isInSidePanel = useIsInSidePanel();
     const sidePanelContext = useSidePanelContext(reportID);
     const [quickAction] = useOnyx(ONYXKEYS.NVP_QUICK_ACTION_GLOBAL_CREATE);
@@ -153,6 +155,7 @@ function useComposerSubmit(reportID: string) {
             sidePanelContext,
             reportActionID: optimisticReportActionID,
             delegateAccountID,
+            formatPhoneNumber,
         });
     };
 

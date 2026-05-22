@@ -163,6 +163,7 @@ import {
     isProcessingReport,
     isReportManuallyReimbursed,
     isReportNotFound,
+    isReportParticipant,
     isSelfDM,
     isValidReportIDFromPath,
     prepareOnboardingOnyxData,
@@ -367,6 +368,7 @@ type AddCommentParams = {
     pregeneratedResponseParams?: PregeneratedResponseParams;
     reportActionID?: string;
     delegateAccountID: number | undefined;
+    formatPhoneNumber?: LocaleContextProps['formatPhoneNumber'];
 };
 
 type AddActionsParams = {
@@ -382,6 +384,7 @@ type AddActionsParams = {
     pregeneratedResponseParams?: PregeneratedResponseParams;
     reportActionID?: string;
     delegateAccountID: number | undefined;
+    formatPhoneNumber?: LocaleContextProps['formatPhoneNumber'];
 };
 
 type AddAttachmentWithCommentParams = {
@@ -820,6 +823,7 @@ function addActions({
     pregeneratedResponseParams,
     reportActionID,
     delegateAccountID,
+    formatPhoneNumber,
 }: AddActionsParams) {
     if (!report?.reportID) {
         return;
@@ -863,6 +867,22 @@ function addActions({
 
         // And the API command needs to go to the new API which supports combining both text and attachments in a single report action
         commandName = WRITE_COMMANDS.ADD_TEXT_AND_ATTACHMENT;
+    }
+
+    if (isGroupChatReportUtils(reportForAction) && reportCommentText && formatPhoneNumber) {
+        const mentionEmailRegex = /<mention-user>(.*?)<\/mention-user>/g;
+        const matches = [...reportCommentText.matchAll(mentionEmailRegex)];
+        const mentionedEmails = matches.map((match) => Str.removeSMSDomain(match[1].substring(1)));
+        const inviteeEmailsToAccountIDs: InvitedEmailsToAccountIDs = {};
+        for (const email of mentionedEmails) {
+            const accountID = Object.values(allPersonalDetails ?? {}).find((p) => p?.login === email)?.accountID;
+            if (accountID && !isReportParticipant(accountID, reportForAction)) {
+                inviteeEmailsToAccountIDs[email] = accountID;
+            }
+        }
+        if (Object.keys(inviteeEmailsToAccountIDs).length > 0) {
+            inviteToGroupChat(reportForAction, inviteeEmailsToAccountIDs, formatPhoneNumber);
+        }
     }
 
     // Store all markdown text attachments i.e `![](https://images.unsplash.com/...)`
@@ -1145,6 +1165,7 @@ function addComment({
     pregeneratedResponseParams,
     reportActionID,
     delegateAccountID,
+    formatPhoneNumber,
 }: AddCommentParams) {
     if (shouldPlaySound) {
         playSound(SOUNDS.DONE);
@@ -1161,6 +1182,7 @@ function addComment({
         reportActionID,
         delegateAccountID,
         sidePanelContext,
+        formatPhoneNumber,
     });
 }
 

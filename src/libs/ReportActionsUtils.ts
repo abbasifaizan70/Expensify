@@ -2552,7 +2552,7 @@ function getMentionedAccountIDsFromAction(reportAction: OnyxInputOrEntry<ReportA
     return isActionOfType(reportAction, CONST.REPORT.ACTIONS.TYPE.ADD_COMMENT) ? (getOriginalMessage(reportAction)?.mentionedAccountIDs ?? []) : [];
 }
 
-function getMentionedEmailsFromMessage(message: string) {
+function getMentionedEmailsFromMessage(message: string): string[] {
     const mentionEmailRegex = /<mention-user>(.*?)<\/mention-user>/g;
     const matches = [...message.matchAll(mentionEmailRegex)];
     return matches.map((match) => Str.removeSMSDomain(match[1].substring(1)));
@@ -4664,6 +4664,7 @@ export {
     isReportPreviewAction,
     isReversedTransaction,
     getMentionedAccountIDsFromAction,
+    getMentionedEmailsFromMessage,
     isRoomChangeLogAction,
     isSentMoneyReportAction,
     isSplitBillAction,

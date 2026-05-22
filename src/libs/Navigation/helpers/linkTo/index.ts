@@ -188,9 +188,18 @@ export default function linkTo(navigation: NavigationContainerRef<RootNavigatorP
         action.type = CONST.NAVIGATION.ACTION_TYPE.PUSH;
     }
 
-    // When we link to a report action in the current report, we want to push instead of replace so that back navigation
-    // works naturally.
+    // When we link to a report action in the current report, update the route params in-place so the
+    // message list scrolls to the linked message without pushing a duplicate screen onto the stack.
     else if (isNavigatingToReportActionWithinSameReport(currentFocusedRoute, focusedRouteFromPath)) {
+        const newParams = focusedRouteFromPath?.params as ReportsSplitNavigatorParamList[typeof SCREENS.REPORT] | undefined;
+        const currentRouteKey = currentFocusedRoute.key;
+        if (currentRouteKey && newParams?.reportActionID) {
+            navigation.dispatch({
+                ...CommonActions.setParams({reportActionID: newParams.reportActionID}),
+                source: currentRouteKey,
+            });
+            return;
+        }
         action.type = CONST.NAVIGATION.ACTION_TYPE.PUSH;
     }
 
