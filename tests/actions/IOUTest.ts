@@ -22,7 +22,7 @@ import {
 } from '@libs/actions/IOU/MoneyRequest';
 import {calculateDiffAmount} from '@libs/actions/IOU/MoneyRequestBuilder';
 import {handleNavigateAfterExpenseCreate} from '@libs/actions/IOU/NavigationHelpers';
-import {shouldOptimisticallyUpdateSearch} from '@libs/actions/IOU/SearchUpdate';
+import {mergeLiveTransactionsIntoGroupedSearchSnapshotData, shouldOptimisticallyUpdateSearch} from '@libs/actions/IOU/SearchUpdate';
 import {completeSplitBill, createSplitsAndOnyxData, splitBill, startSplitBill} from '@libs/actions/IOU/Split';
 import {updateSplitTransactionsFromSplitExpensesFlow} from '@libs/actions/IOU/SplitTransactionUpdate';
 import {requestMoney, trackExpense} from '@libs/actions/IOU/TrackExpense';
@@ -4859,6 +4859,138 @@ describe('actions/IOU', () => {
             expect(optimisticData.some((update) => update.key === groupedSnapshotKey)).toBeTruthy();
 
             getCurrentSearchQueryJSONSpy.mockRestore();
+        });
+
+        it('adds grouped from child snapshot optimistic data even when groupBy is not on the active query', async () => {
+            const currentSearchQueryJSON = {
+                type: CONST.SEARCH.DATA_TYPES.EXPENSE,
+                status: '' as SearchStatus,
+                sortBy: CONST.SEARCH.TABLE_COLUMNS.DATE,
+                sortOrder: CONST.SEARCH.SORT_ORDER.DESC,
+                flatFilters: [],
+                hash: 591785022,
+                inputQuery: 'type:expense sortBy:date sortOrder:desc',
+                recentSearchHash: 714245044,
+                similarSearchHash: 1023624110,
+            } as SearchQueryJSON;
+
+            const getCurrentSearchQueryJSONSpy = jest.spyOn(SearchQueryUtils, 'getCurrentSearchQueryJSON').mockReturnValue(currentSearchQueryJSON);
+
+            requestMoney({
+                action: CONST.IOU.ACTION.CREATE,
+                report: {reportID: ''},
+                participantParams: {
+                    payeeEmail: RORY_EMAIL,
+                    payeeAccountID: RORY_ACCOUNT_ID,
+                    participant: {login: CARLOS_EMAIL, accountID: CARLOS_ACCOUNT_ID},
+                },
+                transactionParams: {
+                    amount: 10000,
+                    attendees: [],
+                    currency: CONST.CURRENCY.USD,
+                    created: '',
+                    merchant: 'KFC',
+                    comment: '',
+                    linkedTrackedExpenseReportAction: {
+                        reportActionID: '',
+                        actionName: CONST.REPORT.ACTIONS.TYPE.IOU,
+                        created: '2024-10-30',
+                    },
+                    actionableWhisperReportActionID: '1',
+                    linkedTrackedExpenseReportID: '1',
+                },
+                shouldGenerateTransactionThreadReport: true,
+                isASAPSubmitBetaEnabled: false,
+                currentUserAccountIDParam: RORY_ACCOUNT_ID,
+                currentUserEmailParam: RORY_EMAIL,
+                transactionViolations: {},
+                policyRecentlyUsedCurrencies: [],
+                isSelfTourViewed: false,
+                quickAction: undefined,
+                betas: [CONST.BETAS.ALL],
+                existingTransactionDraft: undefined,
+                draftTransactionIDs: [],
+                personalDetails: {},
+            });
+
+            await waitForBatchedUpdates();
+
+            const [, , requestData] = writeSpy.mock.calls.at(0) as [ApiCommand, Record<string, unknown>, {optimisticData?: Array<{key: string}>}];
+            const optimisticData = requestData.optimisticData ?? [];
+
+            const newFlatFilters = [
+                {
+                    key: CONST.SEARCH.SYNTAX_FILTER_KEYS.FROM,
+                    filters: [{operator: CONST.SEARCH.SYNTAX_OPERATORS.EQUAL_TO, value: String(RORY_ACCOUNT_ID)}],
+                },
+            ];
+            const groupedTransactionsQueryJSON = SearchQueryUtils.buildSearchQueryJSON(
+                SearchQueryUtils.buildSearchQueryString({
+                    ...currentSearchQueryJSON,
+                    groupBy: undefined,
+                    flatFilters: newFlatFilters,
+                }),
+            );
+            const groupedSnapshotKey = `${ONYXKEYS.COLLECTION.SNAPSHOT}${groupedTransactionsQueryJSON?.hash}`;
+            expect(optimisticData.some((update) => update.key === groupedSnapshotKey)).toBeTruthy();
+
+            getCurrentSearchQueryJSONSpy.mockRestore();
+        });
+
+        it('merges live Onyx transactions missing from grouped child search snapshots', async () => {
+            const transactionID = 'offline-transaction-1';
+            const reportID = 'offline-report-1';
+            const transactionsQueryJSON = SearchQueryUtils.buildSearchQueryJSON(`type:expense from:${RORY_ACCOUNT_ID}`);
+
+            if (!transactionsQueryJSON) {
+                throw new Error('Expected grouped child search query JSON to be defined');
+            }
+
+            const transactionKey = `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}` as const;
+            const reportKey = `${ONYXKEYS.COLLECTION.REPORT}${reportID}` as const;
+            const reportActionID = 'offline-action-1';
+            const iouAction = {
+                reportActionID,
+                actionName: CONST.REPORT.ACTIONS.TYPE.IOU,
+                actorAccountID: RORY_ACCOUNT_ID,
+                originalMessage: {
+                    IOUTransactionID: transactionID,
+                    type: CONST.IOU.REPORT_ACTION_TYPE.CREATE,
+                },
+            };
+
+            await Onyx.merge(reportKey, {
+                reportID,
+                type: CONST.REPORT.TYPE.EXPENSE,
+                stateNum: CONST.REPORT.STATE_NUM.OPEN,
+                statusNum: CONST.REPORT.STATUS_NUM.OPEN,
+                ownerAccountID: RORY_ACCOUNT_ID,
+            });
+            await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${reportID}`, {[reportActionID]: iouAction});
+            await Onyx.merge(transactionKey, {
+                transactionID,
+                reportID,
+                amount: 1000,
+                currency: CONST.CURRENCY.USD,
+                merchant: 'Offline merchant',
+                pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+            });
+            await waitForBatchedUpdates();
+
+            const allTransactions = {
+                [transactionKey]: {
+                    transactionID,
+                    reportID,
+                    amount: 1000,
+                    currency: CONST.CURRENCY.USD,
+                    merchant: 'Offline merchant',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+            };
+
+            const mergedData = mergeLiveTransactionsIntoGroupedSearchSnapshotData({}, transactionsQueryJSON, allTransactions);
+            expect(mergedData[transactionKey]).toBeDefined();
+            expect(mergedData[reportKey]).toBeDefined();
         });
 
         test.each([

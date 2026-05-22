@@ -1,5 +1,5 @@
 import {useIsFocused} from '@react-navigation/native';
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {View} from 'react-native';
 import type {OnyxEntry} from 'react-native-onyx';
 // Use the original useOnyx hook to get the real-time data from Onyx and not from the snapshot
@@ -25,6 +25,7 @@ import useSyncFocus from '@hooks/useSyncFocus';
 import useTheme from '@hooks/useTheme';
 import useThemeStyles from '@hooks/useThemeStyles';
 import {search} from '@libs/actions/Search';
+import {mergeLiveTransactionsIntoGroupedSearchSnapshotData} from '@libs/actions/IOU/SearchUpdate';
 import type {TransactionPreviewData} from '@libs/actions/Search';
 import getNonEmptyStringOnyxID from '@libs/getNonEmptyStringOnyxID';
 import type {ModifiedMouseEvent} from '@libs/Navigation/helpers/openInternalRouteInNewTab';
@@ -126,16 +127,25 @@ function TransactionGroupListItem<TItem extends ListItem>({
     const [bankAccountList] = useOnyx(ONYXKEYS.BANK_ACCOUNT_LIST);
     const [cardFeeds] = useOnyx(ONYXKEYS.COLLECTION.SHARED_NVP_PRIVATE_DOMAIN_MEMBER);
     const [conciergeReportID] = useOnyx(ONYXKEYS.CONCIERGE_REPORT_ID);
+    const [allTransactions] = useOnyx(ONYXKEYS.COLLECTION.TRANSACTION);
+
+    const snapshotDataWithLiveTransactions = useMemo(() => {
+        if (isExpenseReportType || !groupItem.transactionsQueryJSON) {
+            return transactionsSnapshot?.data;
+        }
+
+        return mergeLiveTransactionsIntoGroupedSearchSnapshotData(transactionsSnapshot?.data, groupItem.transactionsQueryJSON, allTransactions);
+    }, [allTransactions, groupItem.transactionsQueryJSON, isExpenseReportType, transactionsSnapshot?.data]);
 
     let transactions: TransactionListItemType[];
     if (isExpenseReportType) {
         transactions = groupItem.transactions;
-    } else if (!transactionsSnapshot?.data) {
+    } else if (!snapshotDataWithLiveTransactions) {
         transactions = [];
     } else {
         const [sectionData] = getSections({
             type: CONST.SEARCH.DATA_TYPES.EXPENSE,
-            data: transactionsSnapshot?.data,
+            data: snapshotDataWithLiveTransactions,
             currentAccountID: currentUserDetails.accountID,
             currentUserEmail: currentUserDetails.email ?? '',
             translate,

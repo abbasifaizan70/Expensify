@@ -1,8 +1,9 @@
-import type {OnyxEntry, OnyxUpdate} from 'react-native-onyx';
+import type {OnyxCollection, OnyxEntry, OnyxUpdate} from 'react-native-onyx';
 import Onyx from 'react-native-onyx';
 import type {ValueOf} from 'type-fest';
 import type {SearchQueryJSON} from '@components/Search/types';
-import {isExpenseReport, isOptimisticPersonalDetail} from '@libs/ReportUtils';
+import {getIOUActionForReportID} from '@libs/ReportActionsUtils';
+import {getReportOrDraftReport, isExpenseReport, isOptimisticPersonalDetail} from '@libs/ReportUtils';
 import {buildSearchQueryJSON, buildSearchQueryString, getCurrentSearchQueryJSON} from '@libs/SearchQueryUtils';
 import {getSuggestedSearches} from '@libs/SearchUIUtils';
 import CONST from '@src/CONST';
@@ -39,11 +40,9 @@ type GetSearchOnyxUpdateParams = {
     transactionThreadReportID: string | undefined;
 };
 
-//  Determines whether the current search results should be optimistically updated
-function shouldOptimisticallyUpdateSearch(
+function doesTransactionMatchSearchStatusAndPolicy(
     currentSearchQueryJSON: Readonly<SearchQueryJSON>,
     iouReport: OnyxEntry<OnyxTypes.Report>,
-    isInvoice: boolean | undefined,
     transaction?: OnyxEntry<OnyxTypes.Transaction>,
 ) {
     if (
@@ -53,9 +52,10 @@ function shouldOptimisticallyUpdateSearch(
     ) {
         return false;
     }
-    let shouldOptimisticallyUpdateByStatus;
+
     const status = currentSearchQueryJSON.status;
     const transactionReportID = transaction?.reportID;
+    let shouldOptimisticallyUpdateByStatus;
     if (Array.isArray(status)) {
         shouldOptimisticallyUpdateByStatus = status.some((val) => {
             const expenseStatus = val as ValueOf<typeof CONST.SEARCH.STATUS.EXPENSE>;
@@ -66,13 +66,123 @@ function shouldOptimisticallyUpdateSearch(
         shouldOptimisticallyUpdateByStatus = expenseReportStatusFilterMapping[expenseStatus](iouReport, transactionReportID);
     }
 
-    if (currentSearchQueryJSON.policyID?.length && iouReport?.policyID) {
-        if (!currentSearchQueryJSON.policyID.includes(iouReport.policyID)) {
+    if (currentSearchQueryJSON.policyID?.length && iouReport?.policyID && !currentSearchQueryJSON.policyID.includes(iouReport.policyID)) {
+        return false;
+    }
+
+    return shouldOptimisticallyUpdateByStatus;
+}
+
+function doesFlatFilterMatchTransaction(
+    filterKey: string,
+    filterValues: Array<{operator: string; value: string | number}>,
+    transaction: OnyxTypes.Transaction,
+    iouReport: OnyxEntry<OnyxTypes.Report>,
+) {
+    const iouAction = getIOUActionForReportID(transaction.reportID, transaction.transactionID);
+    const submitterAccountID = iouAction?.actorAccountID ?? iouReport?.ownerAccountID;
+
+    if (filterKey === CONST.SEARCH.SYNTAX_FILTER_KEYS.FROM) {
+        if (submitterAccountID === undefined) {
             return false;
+        }
+        return filterValues.some(({operator, value}) => {
+            const filterAccountID = Number(value);
+            if (operator === CONST.SEARCH.SYNTAX_OPERATORS.NOT_EQUAL_TO) {
+                return submitterAccountID !== filterAccountID;
+            }
+            return submitterAccountID === filterAccountID;
+        });
+    }
+
+    return true;
+}
+
+function doesTransactionBelongToGroupedChildSearch(transactionsQueryJSON: Readonly<SearchQueryJSON>, transaction: OnyxTypes.Transaction, iouReport: OnyxEntry<OnyxTypes.Report>) {
+    if (transactionsQueryJSON.type !== CONST.SEARCH.DATA_TYPES.EXPENSE) {
+        return false;
+    }
+
+    if (!doesTransactionMatchSearchStatusAndPolicy(transactionsQueryJSON, iouReport, transaction)) {
+        return false;
+    }
+
+    return transactionsQueryJSON.flatFilters.every((flatFilter) => doesFlatFilterMatchTransaction(flatFilter.key, flatFilter.filters, transaction, iouReport));
+}
+
+function mergeLiveTransactionsIntoGroupedSearchSnapshotData(
+    snapshotData: SearchResultDataType | undefined,
+    transactionsQueryJSON: Readonly<SearchQueryJSON> | undefined,
+    allTransactions: OnyxCollection<OnyxTypes.Transaction> | undefined,
+): SearchResultDataType {
+    if (!transactionsQueryJSON || !allTransactions) {
+        return snapshotData ?? {};
+    }
+
+    const mergedData: SearchResultDataType = {...(snapshotData ?? {})};
+    const deprecatedCurrentUserPersonalDetails = getCurrentUserPersonalDetails();
+    let hasChanges = false;
+
+    for (const [transactionKey, transaction] of Object.entries(allTransactions)) {
+        if (!transaction?.transactionID || !transactionKey.startsWith(ONYXKEYS.COLLECTION.TRANSACTION)) {
+            continue;
+        }
+
+        if (mergedData[transactionKey as keyof SearchResultDataType]) {
+            continue;
+        }
+
+        if (transaction.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE || transaction.reportID === CONST.REPORT.SPLIT_REPORT_ID) {
+            continue;
+        }
+
+        const iouReport = getReportOrDraftReport(transaction.reportID);
+        if (!doesTransactionBelongToGroupedChildSearch(transactionsQueryJSON, transaction, iouReport)) {
+            continue;
+        }
+
+        mergedData[transactionKey as keyof SearchResultDataType] = transaction;
+        hasChanges = true;
+
+        const iouAction = getIOUActionForReportID(transaction.reportID, transaction.transactionID);
+        const fromAccountID = iouAction?.actorAccountID ?? iouReport?.ownerAccountID ?? deprecatedCurrentUserPersonalDetails?.accountID;
+
+        if (fromAccountID && deprecatedCurrentUserPersonalDetails?.accountID === fromAccountID) {
+            mergedData[ONYXKEYS.PERSONAL_DETAILS_LIST] = {
+                ...(mergedData[ONYXKEYS.PERSONAL_DETAILS_LIST] ?? {}),
+                [fromAccountID]: {
+                    accountID: fromAccountID,
+                    avatar: deprecatedCurrentUserPersonalDetails.avatar,
+                    displayName: deprecatedCurrentUserPersonalDetails.displayName,
+                    login: deprecatedCurrentUserPersonalDetails.login,
+                },
+            };
+        }
+
+        if (iouReport) {
+            mergedData[`${ONYXKEYS.COLLECTION.REPORT}${iouReport.reportID}`] = iouReport;
+        }
+
+        if (iouReport && iouAction) {
+            const reportActionsKey = `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${iouReport.reportID}` as keyof SearchResultDataType;
+            mergedData[reportActionsKey] = {
+                ...(mergedData[reportActionsKey] as Record<string, OnyxTypes.ReportAction> | undefined),
+                [iouAction.reportActionID]: iouAction,
+            };
         }
     }
 
-    if (!shouldOptimisticallyUpdateByStatus) {
+    return hasChanges ? mergedData : (snapshotData ?? {});
+}
+
+//  Determines whether the current search results should be optimistically updated
+function shouldOptimisticallyUpdateSearch(
+    currentSearchQueryJSON: Readonly<SearchQueryJSON>,
+    iouReport: OnyxEntry<OnyxTypes.Report>,
+    isInvoice: boolean | undefined,
+    transaction?: OnyxEntry<OnyxTypes.Transaction>,
+) {
+    if (!doesTransactionMatchSearchStatusAndPolicy(currentSearchQueryJSON, iouReport, transaction)) {
         return false;
     }
 
@@ -103,7 +213,7 @@ function shouldOptimisticallyUpdateSearch(
 
     const matchesFilterQuery = hasNoFlatFilters || matchesSubmitQuery || matchesApproveQuery || matchesUnapprovedCashQuery;
 
-    return shouldOptimisticallyUpdateByStatus && validSearchTypes && matchesFilterQuery;
+    return validSearchTypes && matchesFilterQuery;
 }
 
 function getSearchOnyxUpdate({
@@ -200,38 +310,39 @@ function getSearchOnyxUpdate({
             },
         ];
 
-        if (currentSearchQueryJSON.groupBy === CONST.SEARCH.GROUP_BY.FROM) {
-            const newFlatFilters = currentSearchQueryJSON.flatFilters.filter((filter) => filter.key !== CONST.SEARCH.SYNTAX_FILTER_KEYS.FROM);
-            newFlatFilters.push({
-                key: CONST.SEARCH.SYNTAX_FILTER_KEYS.FROM,
-                filters: [{operator: CONST.SEARCH.SYNTAX_OPERATORS.EQUAL_TO, value: fromAccountID}],
-            });
+        // Grouped search stores transactions in a separate child snapshot keyed by the flat query
+        // (e.g. type:expense from:<accountID>). Always update that snapshot so offline expenses appear
+        // when the user later applies group-by:from, even if the active query is not grouped.
+        const newFlatFilters = currentSearchQueryJSON.flatFilters.filter((filter) => filter.key !== CONST.SEARCH.SYNTAX_FILTER_KEYS.FROM);
+        newFlatFilters.push({
+            key: CONST.SEARCH.SYNTAX_FILTER_KEYS.FROM,
+            filters: [{operator: CONST.SEARCH.SYNTAX_OPERATORS.EQUAL_TO, value: fromAccountID}],
+        });
 
-            const groupTransactionsQueryJSON = buildSearchQueryJSON(
-                buildSearchQueryString({
-                    ...currentSearchQueryJSON,
-                    groupBy: undefined,
-                    flatFilters: newFlatFilters,
-                }),
-            );
+        const groupTransactionsQueryJSON = buildSearchQueryJSON(
+            buildSearchQueryString({
+                ...currentSearchQueryJSON,
+                groupBy: undefined,
+                flatFilters: newFlatFilters,
+            }),
+        );
 
-            if (groupTransactionsQueryJSON?.hash) {
-                optimisticData.push({
-                    onyxMethod: Onyx.METHOD.MERGE,
-                    key: `${ONYXKEYS.COLLECTION.SNAPSHOT}${groupTransactionsQueryJSON.hash}` as const,
-                    value: {
-                        search: {
-                            type: groupTransactionsQueryJSON.type,
-                            status: groupTransactionsQueryJSON.status,
-                            offset: 0,
-                            hasMoreResults: false,
-                            hasResults: true,
-                            isLoading: false,
-                        },
-                        data: optimisticSnapshotData,
+        if (groupTransactionsQueryJSON?.hash) {
+            optimisticData.push({
+                onyxMethod: Onyx.METHOD.MERGE,
+                key: `${ONYXKEYS.COLLECTION.SNAPSHOT}${groupTransactionsQueryJSON.hash}` as const,
+                value: {
+                    search: {
+                        type: groupTransactionsQueryJSON.type,
+                        status: groupTransactionsQueryJSON.status,
+                        offset: 0,
+                        hasMoreResults: false,
+                        hasResults: true,
+                        isLoading: false,
                     },
-                });
-            }
+                    data: optimisticSnapshotData,
+                },
+            });
         }
 
         return {
@@ -241,4 +352,10 @@ function getSearchOnyxUpdate({
     }
 }
 
-export {getSearchOnyxUpdate, shouldOptimisticallyUpdateSearch};
+export {
+    doesTransactionBelongToGroupedChildSearch,
+    doesTransactionMatchSearchStatusAndPolicy,
+    getSearchOnyxUpdate,
+    mergeLiveTransactionsIntoGroupedSearchSnapshotData,
+    shouldOptimisticallyUpdateSearch,
+};
