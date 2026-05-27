@@ -9901,6 +9901,16 @@ function getReportIDFromLink(url: string | null): string {
     return reportID;
 }
 
+function isConciergeLink(url: string | null): boolean {
+    const route = getRouteFromLink(url);
+    if (!route) {
+        return false;
+    }
+
+    const normalizedRoute = route.startsWith('/') ? route.slice(1) : route;
+    return normalizedRoute === ROUTES.CONCIERGE || normalizedRoute.startsWith(`${ROUTES.CONCIERGE}/`);
+}
+
 /**
  * Check if the chat report is linked to an iou that is waiting for the current user to add a credit bank account.
  */
@@ -13403,6 +13413,7 @@ export {
     isClosedExpenseReportWithNoExpenses,
     isCompletedTaskReport,
     isConciergeChatReport,
+    isConciergeLink,
     isCurrentUserSubmitter,
     isCurrentUserTheOnlyParticipant,
     isDM,

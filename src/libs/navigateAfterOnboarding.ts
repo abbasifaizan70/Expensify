@@ -11,7 +11,7 @@ import SidePanelActions from './actions/SidePanel';
 import {setOnboardingRHPVariant} from './actions/Welcome';
 import shouldOpenOnAdminRoom from './Navigation/helpers/shouldOpenOnAdminRoom';
 import Navigation from './Navigation/Navigation';
-import {findLastAccessedReport, getReportIDFromLink, isConciergeChatReport, isSelfDM} from './ReportUtils';
+import {findLastAccessedReport, getReportIDFromLink, isConciergeChatReport, isConciergeLink, isSelfDM} from './ReportUtils';
 import type {ArchivedReportsIDSet} from './SearchUIUtils';
 
 let onboardingRHPVariant: OnyxEntry<OnboardingRHPVariant>;
@@ -82,12 +82,31 @@ function navigateAfterOnboarding(
         return;
     }
 
+    const variant = variantOverride ?? onboardingRHPVariant;
+
+    // User opened /concierge while signed out — after onboarding, open Concierge with HOME underneath
+    // so the back button returns to Homepage (#90303). On wide screens the RHP variant path already
+    // navigates to HOME and opens the side panel.
+    if (isConciergeLink(initialURL ?? null)) {
+        if (shouldOpenRHPVariant(variantOverride)) {
+            handleRHPVariantNavigation(onboardingPolicyID, variantOverride);
+            return;
+        }
+
+        if (isSmallScreenWidth) {
+            Navigation.navigate(ROUTES.HOME);
+            Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(conciergeReportID));
+            return;
+        }
+    }
+
     // On mobile (small screen), Track workspace admins with the trackExpensesWithConcierge variant
     // should navigate directly to the Concierge DM (which contains onboarding tasks).
     // This check is outside shouldOpenRHPVariant because that function returns false on native
     // (Side Panel doesn't exist on native), but we still need to navigate to Concierge on mobile.
-    const variant = variantOverride ?? onboardingRHPVariant;
+    // Navigate to HOME first so the back button returns to Homepage (#90303).
     if (isSmallScreenWidth && variant === CONST.ONBOARDING_RHP_VARIANT.TRACK_EXPENSES_WITH_CONCIERGE) {
+        Navigation.navigate(ROUTES.HOME);
         Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(conciergeReportID));
         return;
     }
