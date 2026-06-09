@@ -33,6 +33,7 @@ import {
     isGroupChat,
     isInvoiceReport as isInvoiceReportReportUtils,
     isOneTransactionReport,
+    isOpenExpenseReport,
     isPolicyExpenseChat as isPolicyExpenseChatReportUtil,
     isSelfDM,
     populateOptimisticReportFormula,
@@ -447,6 +448,12 @@ function buildOnyxDataForMoneyRequest(moneyRequestParams: BuildOnyxDataForMoneyR
     const isPerDiemRequest = isPerDiemRequestTransactionUtils(transaction);
     const isTimeRequest = isTimeRequestTransactionUtils(transaction);
     const outstandingChildRequest = getOutstandingChildRequest(iou.report);
+    // The workspace chat's iouReportID should always point at the open/active expense report so that a new expense
+    // started from the chat composer attaches to it. When an expense is instead added to an existing expense report
+    // that is no longer open (e.g. one that was already submitted from its report view), we must not repoint the chat
+    // back to that report. Submitting a report clears the chat's iouReportID, and re-pointing it here would cause a
+    // brand new expense started from the chat composer to be wrongly added to the already-submitted report.
+    const isReusingNonOpenExpenseReport = !shouldCreateNewMoneyRequestReport && isExpenseReport(iou.report) && !isOpenExpenseReport(iou.report);
     const clearedPendingFields = Object.fromEntries(Object.keys(transaction.pendingFields ?? {}).map((key) => [key, null]));
     const onyxData: OnyxData<BuildOnyxDataForMoneyRequestKeys> = {
         optimisticData: [],
@@ -555,8 +562,9 @@ function buildOnyxDataForMoneyRequest(moneyRequestParams: BuildOnyxDataForMoneyR
                     ...chat.report,
                     lastReadTime: DateUtils.getDBTime(),
                     ...(shouldCreateNewMoneyRequestReport ? {lastVisibleActionCreated: chat.reportPreviewAction.created} : {}),
-                    // do not update iouReportID if auto submit beta is enabled and it is a scan request
-                    ...(isASAPSubmitBetaEnabled && isScanRequest ? {} : {iouReportID: iou.report.reportID}),
+                    // do not update iouReportID if auto submit beta is enabled and it is a scan request, or when
+                    // reusing an existing expense report that is no longer open (e.g. already submitted)
+                    ...((isASAPSubmitBetaEnabled && isScanRequest) || isReusingNonOpenExpenseReport ? {} : {iouReportID: iou.report.reportID}),
                     ...outstandingChildRequest,
                     ...(isNewChatReport ? {pendingFields: {createChat: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD}} : {}),
                 },

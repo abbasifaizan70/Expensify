@@ -380,4 +380,63 @@ describe('buildOnyxDataForMoneyRequest', () => {
             });
         });
     });
+
+    describe('chat report iouReportID update behavior', () => {
+        function buildMockExpenseReport(reportID: string, chatReportID: string, stateNum: number, statusNum: number): Report {
+            return {
+                reportID,
+                type: CONST.REPORT.TYPE.EXPENSE,
+                chatReportID,
+                policyID: 'policy-1',
+                currency: CONST.CURRENCY.USD,
+                ownerAccountID: CURRENT_USER_ACCOUNT_ID,
+                stateNum,
+                statusNum,
+            } as unknown as Report;
+        }
+
+        function buildParamsWithIouReport(iouReport: Report, shouldCreateNewMoneyRequestReport: boolean): BuildOnyxDataParams {
+            const optimisticParams = buildBaseOptimisticParams(iouReport.reportID);
+            optimisticParams.iou.report = iouReport;
+            return {
+                isNewChatReport: false,
+                shouldCreateNewMoneyRequestReport,
+                shouldGenerateTransactionThreadReport: false,
+                isASAPSubmitBetaEnabled: false,
+                currentUserAccountIDParam: CURRENT_USER_ACCOUNT_ID,
+                currentUserEmailParam: CURRENT_USER_EMAIL,
+                hasViolations: false,
+                quickAction: undefined,
+                isSelfDMSplit: false,
+                optimisticParams,
+            };
+        }
+
+        it('sets the chat iouReportID when reusing an OPEN expense report', () => {
+            const openExpenseReport = buildMockExpenseReport(IOU_REPORT_ID, CHAT_REPORT_ID, CONST.REPORT.STATE_NUM.OPEN, CONST.REPORT.STATUS_NUM.OPEN);
+            const {optimisticData} = buildOnyxDataForMoneyRequest(buildParamsWithIouReport(openExpenseReport, false));
+            const chatReportEntry = optimisticData?.find((entry) => entry.key === `${ONYXKEYS.COLLECTION.REPORT}${CHAT_REPORT_ID}`);
+
+            expect((chatReportEntry?.value as Partial<Report>)?.iouReportID).toBe(IOU_REPORT_ID);
+        });
+
+        // Regression test: after a report is submitted, the chat's iouReportID is cleared. Adding an expense to that
+        // already-submitted report from its report view must NOT repoint the chat back to it, otherwise a brand new
+        // expense started from the chat composer would be wrongly added to the submitted report instead of a new one.
+        it('does NOT set the chat iouReportID when reusing an already-submitted expense report', () => {
+            const submittedExpenseReport = buildMockExpenseReport(IOU_REPORT_ID, CHAT_REPORT_ID, CONST.REPORT.STATE_NUM.SUBMITTED, CONST.REPORT.STATUS_NUM.SUBMITTED);
+            const {optimisticData} = buildOnyxDataForMoneyRequest(buildParamsWithIouReport(submittedExpenseReport, false));
+            const chatReportEntry = optimisticData?.find((entry) => entry.key === `${ONYXKEYS.COLLECTION.REPORT}${CHAT_REPORT_ID}`);
+
+            expect((chatReportEntry?.value as Partial<Report>)?.iouReportID).toBeUndefined();
+        });
+
+        it('sets the chat iouReportID when a new money request report is created', () => {
+            const submittedExpenseReport = buildMockExpenseReport(IOU_REPORT_ID, CHAT_REPORT_ID, CONST.REPORT.STATE_NUM.SUBMITTED, CONST.REPORT.STATUS_NUM.SUBMITTED);
+            const {optimisticData} = buildOnyxDataForMoneyRequest(buildParamsWithIouReport(submittedExpenseReport, true));
+            const chatReportEntry = optimisticData?.find((entry) => entry.key === `${ONYXKEYS.COLLECTION.REPORT}${CHAT_REPORT_ID}`);
+
+            expect((chatReportEntry?.value as Partial<Report>)?.iouReportID).toBe(IOU_REPORT_ID);
+        });
+    });
 });
