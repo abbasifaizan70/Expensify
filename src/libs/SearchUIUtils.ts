@@ -729,6 +729,28 @@ function getSuggestedSearches(
                 return this.searchQueryJSON?.recentSearchHash ?? CONST.DEFAULT_NUMBER_ID;
             },
         },
+        [CONST.SEARCH.SEARCH_KEYS.MY_EXPENSES]: {
+            key: CONST.SEARCH.SEARCH_KEYS.MY_EXPENSES,
+            translationPath: 'search.tabs.myExpenses',
+            type: CONST.SEARCH.DATA_TYPES.EXPENSE,
+            icon: 'User',
+            searchQuery: buildQueryStringFromFilterFormValues({
+                type: CONST.SEARCH.DATA_TYPES.EXPENSE,
+                from: [`${accountID}`],
+            }),
+            get searchQueryJSON() {
+                return buildSearchQueryJSON(this.searchQuery);
+            },
+            get hash() {
+                return this.searchQueryJSON?.hash ?? CONST.DEFAULT_NUMBER_ID;
+            },
+            get similarSearchHash() {
+                return this.searchQueryJSON?.similarSearchHash ?? CONST.DEFAULT_NUMBER_ID;
+            },
+            get recentSearchHash() {
+                return this.searchQueryJSON?.recentSearchHash ?? CONST.DEFAULT_NUMBER_ID;
+            },
+        },
         [CONST.SEARCH.SEARCH_KEYS.REPORTS]: {
             key: CONST.SEARCH.SEARCH_KEYS.REPORTS,
             translationPath: 'search.tabs.reports',
@@ -1145,9 +1167,14 @@ function getSuggestedSearchesVisibility(
         );
     });
 
+    // Surface a personal "My expenses" view (filtered to the current user) for users who both submit and
+    // approve expenses, matching the Classic "My expenses only" default and avoiding an overwhelming all-expenses list.
+    const shouldShowMyExpensesSuggestion = shouldShowSubmitSuggestion && shouldShowApproveSuggestion;
+
     return {
         visibility: {
             [CONST.SEARCH.SEARCH_KEYS.EXPENSES]: true,
+            [CONST.SEARCH.SEARCH_KEYS.MY_EXPENSES]: shouldShowMyExpensesSuggestion,
             [CONST.SEARCH.SEARCH_KEYS.REPORTS]: true,
             [CONST.SEARCH.SEARCH_KEYS.SUBMIT]: shouldShowSubmitSuggestion,
             [CONST.SEARCH.SEARCH_KEYS.PAY]: shouldShowPaySuggestion,
@@ -4495,6 +4522,9 @@ function createTypeMenuSections(params: TypeMenuSectionsParams): SearchTypeMenuS
 
         if (suggestedSearchesVisibility[CONST.SEARCH.SEARCH_KEYS.EXPENSES]) {
             expenseReportsSection.menuItems.push(suggestedSearches[CONST.SEARCH.SEARCH_KEYS.EXPENSES]);
+        }
+        if (suggestedSearchesVisibility[CONST.SEARCH.SEARCH_KEYS.MY_EXPENSES]) {
+            expenseReportsSection.menuItems.push(suggestedSearches[CONST.SEARCH.SEARCH_KEYS.MY_EXPENSES]);
         }
         if (suggestedSearchesVisibility[CONST.SEARCH.SEARCH_KEYS.REPORTS]) {
             expenseReportsSection.menuItems.push(suggestedSearches[CONST.SEARCH.SEARCH_KEYS.REPORTS]);

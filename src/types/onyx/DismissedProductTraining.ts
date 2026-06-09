@@ -1,6 +1,6 @@
 import CONST from '@src/CONST';
 
-const {CONCIERGE_LHN_GBR, RENAME_SAVED_SEARCH, OUTSTANDING_FILTER, ACCOUNT_SWITCHER, SCAN_TEST_DRIVE_CONFIRMATION, MULTI_SCAN_EDUCATIONAL_MODAL, GPS_TOOLTIP, HAS_FILTER_NEGATION} =
+const {CONCIERGE_LHN_GBR, OUTSTANDING_FILTER, ACCOUNT_SWITCHER, SCAN_TEST_DRIVE_CONFIRMATION, MULTI_SCAN_EDUCATIONAL_MODAL, GPS_TOOLTIP, HAS_FILTER_NEGATION} =
     CONST.PRODUCT_TRAINING_TOOLTIP_NAMES;
 
 /**
@@ -28,11 +28,6 @@ type DismissedProductTraining = {
      * When user dismisses the conciergeLHNGBR product training tooltip, we store the timestamp here.
      */
     [CONCIERGE_LHN_GBR]: DismissedProductTrainingElement;
-
-    /**
-     * When user dismisses the renameSavedSearch product training tooltip, we store the timestamp here.
-     */
-    [RENAME_SAVED_SEARCH]: DismissedProductTrainingElement;
 
     /**
      * When user dismisses the outstanding filter product training tooltip, we store the timestamp here.
