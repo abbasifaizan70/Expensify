@@ -40,6 +40,8 @@ function RejectExpenseReportPage({route}: RejectExpenseReportPageProps) {
 
     const [report] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${getNonEmptyStringOnyxID(reportID)}`);
     const [reportActions] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${getNonEmptyStringOnyxID(reportID)}`);
+    const [policy] = useOnyx(`${ONYXKEYS.COLLECTION.POLICY}${getNonEmptyStringOnyxID(report?.policyID)}`);
+    const [betas] = useOnyx(ONYXKEYS.BETAS);
     const {isDelegateAccessRestricted} = useDelegateNoAccessState();
     const {showDelegateNoAccessModal} = useDelegateNoAccessActions();
     const [selectedTargetAccountID, setSelectedTargetAccountID] = useState<string>('');
@@ -144,6 +146,9 @@ function RejectExpenseReportPage({route}: RejectExpenseReportPageProps) {
             currentUserPersonalDetails?.accountID,
             currentUserPersonalDetails?.displayName,
             currentUserPersonalDetails?.avatar,
+            policy,
+            currentUserPersonalDetails?.login ?? '',
+            betas,
         );
         Navigation.goBack();
     };

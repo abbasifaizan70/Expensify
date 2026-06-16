@@ -12,6 +12,7 @@ import {getLoginByAccountID} from '@libs/PersonalDetailsUtils';
 import {isDelayedSubmissionEnabled} from '@libs/PolicyUtils';
 import {getIOUActionForReportID} from '@libs/ReportActionsUtils';
 import {
+    buildOptimisticCreatedReportAction,
     buildOptimisticExpenseReport,
     buildOptimisticMarkedAsResolvedReportAction,
     buildOptimisticMoneyRequestEntities,
@@ -21,9 +22,13 @@ import {
     buildOptimisticReportLevelRejectAction,
     buildOptimisticReportLevelRejectCommentAction,
     buildOptimisticReportPreview,
+    buildOptimisticSelfDMReport,
+    buildOptimisticUnreportedTransactionAction,
+    findSelfDMReportID,
     generateReportID,
     getDisplayedReportID,
     getParsedComment,
+    getReportOrDraftReport,
     getReportTransactions,
     hasOutstandingChildRequest,
     isIOUReport,
@@ -52,6 +57,7 @@ type RejectMoneyRequestData = {
             | typeof ONYXKEYS.COLLECTION.RAM_ONLY_REPORT_LOADING_STATE
             | typeof ONYXKEYS.COLLECTION.REPORT_NAME_VALUE_PAIRS
             | typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS
+            | typeof ONYXKEYS.SELF_DM_REPORT_ID
         >
     >;
     successData: Array<
@@ -66,6 +72,7 @@ type RejectMoneyRequestData = {
             | typeof ONYXKEYS.COLLECTION.RAM_ONLY_REPORT_LOADING_STATE
             | typeof ONYXKEYS.COLLECTION.REPORT_NAME_VALUE_PAIRS
             | typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS
+            | typeof ONYXKEYS.SELF_DM_REPORT_ID
         >
     >;
     parameters: RejectMoneyRequestParams;
@@ -179,6 +186,7 @@ function prepareRejectMoneyRequestData(
             | typeof ONYXKEYS.COLLECTION.RAM_ONLY_REPORT_LOADING_STATE
             | typeof ONYXKEYS.COLLECTION.REPORT_NAME_VALUE_PAIRS
             | typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS
+            | typeof ONYXKEYS.SELF_DM_REPORT_ID
         >
     > = [];
 
@@ -202,6 +210,7 @@ function prepareRejectMoneyRequestData(
             | typeof ONYXKEYS.COLLECTION.REPORT_METADATA
             | typeof ONYXKEYS.COLLECTION.REPORT_NAME_VALUE_PAIRS
             | typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS
+            | typeof ONYXKEYS.SELF_DM_REPORT_ID
         >
     > = [];
 
@@ -281,6 +290,144 @@ function prepareRejectMoneyRequestData(
                     },
                 },
             );
+
+            // When submission frequency is disabled, the rejected expense must surface in the rejector's selfDM.
+            // Marking the transaction UNREPORTED is not enough on its own — mirror changeTransactionsReport/deleteAppReport
+            // by resolving (or lazily creating) the selfDM, posting an IOU action there, reparenting the transaction
+            // thread onto the selfDM, and adding the UNREPORTED_TRANSACTION action. IOU rejects keep the previous behavior.
+            if (!isIOU) {
+                let selfDMReportID = findSelfDMReportID();
+                let selfDMReport = getReportOrDraftReport(selfDMReportID);
+
+                if (!selfDMReportID) {
+                    const selfDMCreatedTime = DateUtils.getDBTime();
+                    selfDMReport = buildOptimisticSelfDMReport(selfDMCreatedTime);
+                    selfDMReportID = selfDMReport.reportID;
+                    const selfDMCreatedAction = buildOptimisticCreatedReportAction({emailCreatingAction: currentUserLogin, created: selfDMCreatedTime});
+
+                    optimisticData.push(
+                        {
+                            onyxMethod: Onyx.METHOD.SET,
+                            key: `${ONYXKEYS.COLLECTION.REPORT}${selfDMReportID}`,
+                            value: {...selfDMReport, pendingFields: {createChat: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD}},
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: ONYXKEYS.SELF_DM_REPORT_ID,
+                            value: selfDMReportID,
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT_METADATA}${selfDMReportID}`,
+                            value: {isOptimisticReport: true},
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.SET,
+                            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${selfDMReportID}`,
+                            value: {[selfDMCreatedAction.reportActionID]: selfDMCreatedAction},
+                        },
+                    );
+                    successData.push(
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT}${selfDMReportID}`,
+                            value: {pendingFields: {createChat: null}},
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT_METADATA}${selfDMReportID}`,
+                            value: {isOptimisticReport: false},
+                        },
+                    );
+                    failureData.push(
+                        {
+                            onyxMethod: Onyx.METHOD.SET,
+                            key: `${ONYXKEYS.COLLECTION.REPORT}${selfDMReportID}`,
+                            value: null,
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: ONYXKEYS.SELF_DM_REPORT_ID,
+                            value: null,
+                        },
+                    );
+                }
+
+                rejectedToReportID = selfDMReportID;
+
+                const [, , selfDMIOUAction] = buildOptimisticMoneyRequestEntities({
+                    iouReport: selfDMReport,
+                    type: CONST.IOU.REPORT_ACTION_TYPE.CREATE,
+                    amount: transactionAmount,
+                    currency: getCurrency(transaction),
+                    comment: parsedComment,
+                    payeeEmail: currentUserLogin,
+                    participants: [{accountID: currentUserAccountIDParam}],
+                    transactionID: transaction.transactionID,
+                    existingTransactionThreadReportID: childReportID,
+                    shouldGenerateTransactionThreadReport: false,
+                    currentUserAccountID: currentUserAccountIDParam,
+                    delegateAccountIDParam: delegateAccountID,
+                });
+                createdIOUReportActionID = selfDMIOUAction.reportActionID;
+
+                optimisticData.push(
+                    {
+                        onyxMethod: Onyx.METHOD.MERGE,
+                        key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${selfDMReportID}`,
+                        value: {[selfDMIOUAction.reportActionID]: selfDMIOUAction},
+                    },
+                    {
+                        onyxMethod: Onyx.METHOD.MERGE,
+                        key: `${ONYXKEYS.COLLECTION.REPORT}${selfDMReportID}`,
+                        value: {lastVisibleActionCreated: selfDMIOUAction.created},
+                    },
+                );
+                successData.push({
+                    onyxMethod: Onyx.METHOD.MERGE,
+                    key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${selfDMReportID}`,
+                    value: {[selfDMIOUAction.reportActionID]: {pendingAction: null}},
+                });
+                failureData.push({
+                    onyxMethod: Onyx.METHOD.MERGE,
+                    key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${selfDMReportID}`,
+                    value: {[selfDMIOUAction.reportActionID]: null},
+                });
+
+                if (childReportID) {
+                    const unreportedTransactionAction = buildOptimisticUnreportedTransactionAction(childReportID, reportID);
+                    expenseMovedReportActionID = unreportedTransactionAction.reportActionID;
+
+                    optimisticData.push(
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT}${childReportID}`,
+                            value: {parentReportID: selfDMReportID, parentReportActionID: selfDMIOUAction.reportActionID, chatReportID: selfDMReportID},
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${childReportID}`,
+                            value: {[unreportedTransactionAction.reportActionID]: unreportedTransactionAction},
+                        },
+                    );
+                    failureData.push(
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT}${childReportID}`,
+                            value: {
+                                parentReportID: transactionThreadReport?.parentReportID,
+                                parentReportActionID: transactionThreadReport?.parentReportActionID,
+                                chatReportID: transactionThreadReport?.chatReportID,
+                            },
+                        },
+                        {
+                            onyxMethod: Onyx.METHOD.MERGE,
+                            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${childReportID}`,
+                            value: {[unreportedTransactionAction.reportActionID]: null},
+                        },
+                    );
+                }
+            }
 
             // And delete the corresponding REPORTPREVIEW action
             const parentReportID = report?.parentReportID;
@@ -998,9 +1145,26 @@ function rejectExpenseReport(
     currentUserAccountID: number | undefined,
     currentUserDisplayName: string | undefined,
     currentUserAvatarSource: AvatarSource | undefined,
+    policy?: OnyxEntry<OnyxTypes.Policy>,
+    currentUserLogin?: string,
+    betas?: OnyxEntry<OnyxTypes.Beta[]>,
 ) {
     const {reportID} = report;
     const isRejectToSubmitter = targetAccountID === report.ownerAccountID;
+
+    // When submission frequency is disabled there is no approval chain to send the report back to, so a
+    // single-expense reject-to-submitter should unreport the expense to selfDM. The report-level reject path
+    // (REJECT_EXPENSE_REPORT) never does this, so delegate to the transaction-level reject flow — the single
+    // source of truth that already builds the selfDM optimistic data. Delayed-submission policies, previous-approver
+    // rejects, and multi-expense reports keep the existing report-level behavior.
+    const reportTransactions = getReportTransactions(reportID);
+    if (policy && !isDelayedSubmissionEnabled(policy) && isRejectToSubmitter && reportTransactions.length === 1) {
+        const transactionID = reportTransactions.at(0)?.transactionID;
+        if (transactionID) {
+            rejectMoneyRequest(transactionID, reportID, comment, policy, currentUserAccountID ?? CONST.DEFAULT_NUMBER_ID, currentUserLogin ?? '', betas);
+            return;
+        }
+    }
     const baseTimestamp = DateUtils.getDBTime();
     const optimisticRejectAction = buildOptimisticReportLevelRejectAction(isRejectToSubmitter, currentUserAccountID, currentUserDisplayName, currentUserAvatarSource, baseTimestamp);
     const parsedComment = getParsedComment(comment);
