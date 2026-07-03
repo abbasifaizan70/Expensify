@@ -49,7 +49,8 @@ const currentUserLoginAndAccountIDSelector = (session: OnyxEntry<Session>) => ({
 });
 
 type UseSearchTypeMenuSectionsParams = {
-    hash?: number;
+    /** Column-aware hash of the current query — saved searches are keyed by it */
+    columnAwareHash?: number;
     similarSearchHash?: number;
     sortBy?: string;
     sortOrder?: string;
@@ -61,7 +62,7 @@ type UseSearchTypeMenuSectionsParams = {
  * currently focused search, based on the hash
  */
 const useSearchTypeMenuSections = (queryParams?: UseSearchTypeMenuSectionsParams) => {
-    const {hash, similarSearchHash, sortBy, sortOrder, type} = queryParams ?? {};
+    const {columnAwareHash, similarSearchHash, sortBy, sortOrder, type} = queryParams ?? {};
     const [defaultExpensifyCard] = useOnyx(ONYXKEYS.DERIVED.NON_PERSONAL_AND_WORKSPACE_CARD_LIST, {selector: defaultExpensifyCardSelector});
 
     const {defaultCardFeed, cardFeedsByPolicy} = useCardFeedsForDisplay();
@@ -131,7 +132,7 @@ const useSearchTypeMenuSections = (queryParams?: UseSearchTypeMenuSectionsParams
     );
 
     const activeItemIndex = useMemo(() => {
-        const isSavedSearchActive = hash !== undefined && !!savedSearches && Object.keys(savedSearches).some((key) => Number(key) === hash);
+        const isSavedSearchActive = columnAwareHash !== undefined && !!savedSearches && Object.keys(savedSearches).some((key) => Number(key) === columnAwareHash);
 
         if (isSavedSearchActive) {
             return -1;
@@ -169,7 +170,7 @@ const useSearchTypeMenuSections = (queryParams?: UseSearchTypeMenuSectionsParams
         }
 
         return -1;
-    }, [typeMenuSections, savedSearches, hash, similarSearchHash, sortBy, sortOrder, type]);
+    }, [typeMenuSections, savedSearches, columnAwareHash, similarSearchHash, sortBy, sortOrder, type]);
 
     const activeKey = activeItemIndex < 0 ? undefined : typeMenuSections.flatMap((section) => section.menuItems).at(activeItemIndex)?.key;
 

@@ -81,7 +81,7 @@ function SearchTypeMenuNarrow({queryJSON, onTabPress}: SearchTypeMenuNarrowProps
     const navigation = useNavigation();
     const {translate, localeCompare} = useLocalize();
     const {typeMenuSections, activeKey: activeTypeMenuKey} = useSearchTypeMenuSections({
-        hash: queryJSON?.hash,
+        columnAwareHash: queryJSON?.columnAwareHash ?? queryJSON?.hash,
         similarSearchHash: queryJSON?.similarSearchHash,
         sortBy: queryJSON?.sortBy,
         sortOrder: queryJSON?.sortOrder,
@@ -172,7 +172,7 @@ function SearchTypeMenuNarrow({queryJSON, onTabPress}: SearchTypeMenuNarrowProps
                       isCopied: copiedHash === itemHash,
                   });
 
-                  if (Number(key) === queryJSON?.hash) {
+                  if (Number(key) === (queryJSON?.columnAwareHash ?? queryJSON?.hash)) {
                       activeKey = key;
                   }
 

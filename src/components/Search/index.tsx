@@ -138,7 +138,7 @@ function Search({
     onContentReady,
     onDestinationVisible,
 }: SearchProps) {
-    const {type, status, sortBy, sortOrder, hash, similarSearchHash, groupBy, view} = queryJSON;
+    const {type, status, sortBy, sortOrder, hash, similarSearchHash, columnAwareHash, groupBy, view} = queryJSON;
 
     const {isOffline} = useNetwork();
     const prevIsOffline = usePrevious(isOffline);
@@ -181,13 +181,14 @@ function Search({
     const [policyTags] = useOnyx(ONYXKEYS.COLLECTION.POLICY_TAGS);
 
     const searchDataType = useMemo(() => (shouldUseLiveData ? CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT : searchResults?.search?.type), [shouldUseLiveData, searchResults?.search?.type]);
-    const shouldCalculateTotals = useSearchShouldCalculateTotals(currentSearchKey, hash, offset === 0);
+    const shouldCalculateTotals = useSearchShouldCalculateTotals(currentSearchKey, columnAwareHash ?? hash, offset === 0);
 
     const previousReportActions = usePrevious(reportActions);
     const {translate} = useLocalize();
     const searchListRef = useRef<SelectionListHandle<SearchListItem> | null>(null);
 
-    const savedSearchSelector = useCallback((searches: OnyxEntry<SaveSearch>) => searches?.[hash], [hash]);
+    // Saved searches are keyed by columnAwareHash (column-aware identity)
+    const savedSearchSelector = useCallback((searches: OnyxEntry<SaveSearch>) => searches?.[columnAwareHash ?? hash], [columnAwareHash, hash]);
     const [savedSearch] = useOnyx(ONYXKEYS.SAVED_SEARCHES, {
         selector: savedSearchSelector,
     });

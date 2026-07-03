@@ -353,6 +353,8 @@ type SearchQueryJSON = {
     recentSearchHash: number;
     /** Use similarSearchHash to test if two searchers are similar i.e. have same filters but not necessary same values */
     similarSearchHash: number;
+    /** Like `hash`, but including the selected columns. Columns are display-only so they're excluded from `hash` (the snapshot key), while saved-search identity and request dedupe stay column-aware via this hash */
+    columnAwareHash?: number;
     flatFilters: QueryFilters;
     isViewExplicitlySet?: boolean;
 } & SearchQueryAST;

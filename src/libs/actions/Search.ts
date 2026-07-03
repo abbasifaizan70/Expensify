@@ -713,14 +713,19 @@ function getOnyxLoadingData(
 
 function saveSearch({queryJSON, newName}: {queryJSON: Readonly<SearchQueryJSON>; newName?: string}) {
     const saveSearchName = newName ?? queryJSON?.inputQuery ?? '';
-    const jsonQuery = JSON.stringify(queryJSON);
+    // Saved searches are keyed by columnAwareHash so two saved searches that differ only in their selected
+    // columns don't collide under one key. columnAwareHash matches the primary hash from before columns were
+    // excluded from it, so existing saved-search keys are preserved. The hash sent to the backend is overridden
+    // for the same reason.
+    const savedSearchHash = queryJSON.columnAwareHash ?? queryJSON.hash;
+    const jsonQuery = JSON.stringify({...queryJSON, hash: savedSearchHash});
 
     const optimisticData: Array<OnyxUpdate<typeof ONYXKEYS.SAVED_SEARCHES>> = [
         {
             onyxMethod: Onyx.METHOD.MERGE,
             key: `${ONYXKEYS.SAVED_SEARCHES}`,
             value: {
-                [queryJSON.hash]: {
+                [savedSearchHash]: {
                     pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
                     name: saveSearchName,
                     query: queryJSON.inputQuery,
@@ -734,7 +739,7 @@ function saveSearch({queryJSON, newName}: {queryJSON: Readonly<SearchQueryJSON>;
             onyxMethod: Onyx.METHOD.MERGE,
             key: `${ONYXKEYS.SAVED_SEARCHES}`,
             value: {
-                [queryJSON.hash]: null,
+                [savedSearchHash]: null,
             },
         },
     ];
@@ -744,7 +749,7 @@ function saveSearch({queryJSON, newName}: {queryJSON: Readonly<SearchQueryJSON>;
             onyxMethod: Onyx.METHOD.MERGE,
             key: `${ONYXKEYS.SAVED_SEARCHES}`,
             value: {
-                [queryJSON.hash]: {
+                [savedSearchHash]: {
                     pendingAction: null,
                 },
             },
@@ -899,7 +904,8 @@ function search({
         return;
     }
 
-    const dedupeKey = `${queryJSON.hash}_${offset ?? 0}`;
+    // Dedupe by columnAwareHash so requests for searches that differ only in columns remain distinct
+    const dedupeKey = `${queryJSON.columnAwareHash ?? queryJSON.hash}_${offset ?? 0}`;
     if (inFlightSearchRequests.has(dedupeKey)) {
         return;
     }

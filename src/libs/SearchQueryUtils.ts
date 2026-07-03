@@ -577,14 +577,24 @@ function getQueryHashes(query: SearchQueryJSON) {
 
     orderedQuery += ` ${CONST.SEARCH.SYNTAX_ROOT_KEYS.SORT_BY}:${query.sortBy}`;
     orderedQuery += ` ${CONST.SEARCH.SYNTAX_ROOT_KEYS.SORT_ORDER}:${query.sortOrder}`;
-    orderedQuery += ` ${CONST.SEARCH.SYNTAX_ROOT_KEYS.COLUMNS}:${Array.isArray(query.columns) ? query.columns.join(',') : query.columns}`;
+
+    // Columns are a display-only concern — they don't change which results the server returns — so they are
+    // excluded from primaryHash (the snapshot key). This lets a column toggle reuse the already-loaded snapshot
+    // instead of forcing a refetch, which would blank the page while offline.
+    // columnAwareQuery keeps the columns segment (in its original position, before limit) so columnAwareHash is
+    // identical to the previous primaryHash, preserving existing saved-search keys.
+    let columnAwareQuery = `${orderedQuery} ${CONST.SEARCH.SYNTAX_ROOT_KEYS.COLUMNS}:${Array.isArray(query.columns) ? query.columns.join(',') : query.columns}`;
 
     if (query.limit !== undefined) {
         orderedQuery += ` ${CONST.SEARCH.SYNTAX_ROOT_KEYS.LIMIT}:${query.limit}`;
+        columnAwareQuery += ` ${CONST.SEARCH.SYNTAX_ROOT_KEYS.LIMIT}:${query.limit}`;
     }
     const primaryHash = hashText(orderedQuery, 2 ** 32);
 
-    return {primaryHash, recentSearchHash, similarSearchHash};
+    // Used where two searches differing only in columns must remain distinct (saved-search identity, request dedupe)
+    const columnAwareHash = hashText(columnAwareQuery, 2 ** 32);
+
+    return {primaryHash, recentSearchHash, similarSearchHash, columnAwareHash};
 }
 
 /**
@@ -668,10 +678,11 @@ function getCachedSearchQueryJSON(query: SearchQueryString, rawQuery?: SearchQue
             result.limit = Number.isInteger(num) && num > 0 ? num : undefined;
         }
 
-        const {primaryHash, recentSearchHash, similarSearchHash} = getQueryHashes(result);
+        const {primaryHash, recentSearchHash, similarSearchHash, columnAwareHash} = getQueryHashes(result);
         result.hash = primaryHash;
         result.recentSearchHash = recentSearchHash;
         result.similarSearchHash = similarSearchHash;
+        result.columnAwareHash = columnAwareHash;
 
         delete result.rawFilterList;
         if (rawQuery) {

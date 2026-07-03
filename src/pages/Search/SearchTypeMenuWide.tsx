@@ -126,13 +126,15 @@ function Section({section, hash, activeItemIndex, sectionStartIndex, reportCount
 }
 
 function SearchTypeMenuWide({queryJSON}: SearchTypeMenuProps) {
-    const {hash, similarSearchHash, sortBy, sortOrder, type} = queryJSON ?? {};
+    const {hash, similarSearchHash, columnAwareHash, sortBy, sortOrder, type} = queryJSON ?? {};
+    // Saved searches are keyed by the column-aware hash
+    const savedSearchHash = columnAwareHash ?? hash;
 
     const styles = useThemeStyles();
     const {isOffline} = useNetwork();
     const {singleExecution} = useSingleExecution();
     const {clearSelectedTransactions} = useSearchSelectionActions();
-    const {typeMenuSections, activeItemIndex} = useSearchTypeMenuSections({hash, similarSearchHash, sortBy, sortOrder, type});
+    const {typeMenuSections, activeItemIndex} = useSearchTypeMenuSections({columnAwareHash: savedSearchHash, similarSearchHash, sortBy, sortOrder, type});
     const {isVisuallyCollapsed} = useSearchSidebarCollapse();
     const [isSearchDataLoaded, isSearchDataLoadedResult] = useOnyx(ONYXKEYS.IS_SEARCH_PAGE_DATA_LOADED);
     // Intentionally left enabled (no focus freeze): the wide menu renders in the search navigator's ExtraContent
@@ -193,7 +195,7 @@ function SearchTypeMenuWide({queryJSON}: SearchTypeMenuProps) {
                         section={expenseReportsSection}
                         onItemPress={handleTypeMenuItemPress}
                         onCollapsed={updateCollapsedCount}
-                        hash={hash}
+                        hash={savedSearchHash}
                         sectionStartIndex={0}
                         activeItemIndex={activeItemIndex}
                         reportCounts={reportCounts}
@@ -213,7 +215,7 @@ function SearchTypeMenuWide({queryJSON}: SearchTypeMenuProps) {
                             section={section}
                             onItemPress={handleTypeMenuItemPress}
                             onCollapsed={updateCollapsedCount}
-                            hash={hash}
+                            hash={savedSearchHash}
                             sectionStartIndex={sectionStartIndices.at(index + (expenseReportsSection ? 1 : 0)) ?? 0}
                             activeItemIndex={activeItemIndex}
                             reportCounts={reportCounts}
