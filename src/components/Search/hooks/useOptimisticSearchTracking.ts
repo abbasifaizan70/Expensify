@@ -13,7 +13,7 @@ import type SearchResults from '@src/types/onyx/SearchResults';
 
 import type {OnyxCollection} from 'react-native-onyx';
 
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 
 import type {OptimisticTrackingState, TrackingMutableState} from './useStableOptimisticSortedData';
 
@@ -143,7 +143,7 @@ function useOptimisticSearchTracking({searchResults, queryJSON, transactions, re
     }, [isOptimisticTrackingCleared, optimisticWatchKey, transactions]);
 
     // Augment search data with the optimistic transaction (before it appears in server snapshot).
-    const searchDataWithOptimisticTransaction = (() => {
+    const searchDataWithTrackedOptimisticTransaction = (() => {
         const searchData = searchResults?.data;
         if (!searchData || !isTransactionSearchType(type) || !optimisticWatchKey || isOptimisticTrackingCleared) {
             return searchData;
@@ -183,6 +183,48 @@ function useOptimisticSearchTracking({searchResults, queryJSON, transactions, re
 
         return nextSearchData;
     })();
+
+    // Reconcile transactions created OUTSIDE Search's own optimistic-tracking lifecycle (e.g. an expense
+    // added from a workspace chat) that belong to a report already present on this Reports page.
+    //
+    // The block above only ever patches in ONE transaction: the one Search itself is watching via
+    // `optimisticWatchKey`, which is only armed when a deferred-write channel (SEARCH/DISMISS_MODAL) was
+    // reserved by a Search-adjacent submission flow (see deferredLayoutWrite.ts). requestMoney's
+    // TrackExpense.ts call hardcodes `shouldDeferForSearch: false` and no channel is reserved for a plain
+    // "add expense in a workspace chat" action, so `optimisticWatchKey` is never set for that flow and the
+    // block above is a no-op for it.
+    //
+    // Separately, Onyx's snapshot mirroring (react-native-onyx OnyxUtils.updateSnapshots) can only refresh
+    // fields on keys that already exist in the cached SNAPSHOT_ entry - it can never insert a brand-new
+    // `transactions_<id>` key. That's why the report's own `total`/`totalDisplaySpend` (existing fields on
+    // the already-snapshotted `report_<id>`) update correctly, while the report's nested `transactions`
+    // array (built at render time purely from what keys are present in `data`) permanently omits the new
+    // expense - which is exactly the stale selection count/total from #95627.
+    //
+    // This reconciles that gap generally: any live transaction whose reportID matches a report already in
+    // `data` - regardless of how or where it was created - gets folded in before grouping/selection use it.
+    const searchDataWithOptimisticTransaction = useMemo(() => {
+        if (!searchDataWithTrackedOptimisticTransaction || type !== CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT || !transactions) {
+            return searchDataWithTrackedOptimisticTransaction;
+        }
+
+        let result: SearchResults['data'] | undefined;
+        for (const [transactionKey, transaction] of Object.entries(transactions)) {
+            if (!transaction || searchDataWithTrackedOptimisticTransaction[transactionKey as `${typeof ONYXKEYS.COLLECTION.TRANSACTION}${string}`]) {
+                continue;
+            }
+
+            const reportKey = `${ONYXKEYS.COLLECTION.REPORT}${transaction.reportID}` as const;
+            if (!searchDataWithTrackedOptimisticTransaction[reportKey]) {
+                continue;
+            }
+
+            result ??= {...searchDataWithTrackedOptimisticTransaction};
+            result[transactionKey as `${typeof ONYXKEYS.COLLECTION.TRANSACTION}${string}`] = transaction;
+        }
+
+        return result ?? searchDataWithTrackedOptimisticTransaction;
+    }, [searchDataWithTrackedOptimisticTransaction, transactions, type]);
 
     /**
      * Re-arms optimistic tracking for subsequent expense creations while Search
