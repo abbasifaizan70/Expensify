@@ -2562,6 +2562,15 @@ function getRowCapabilities(allActions: SearchTransactionAction[]): RowCapabilit
 }
 
 /**
+ * Decodes a report/task name or description for plain-text display: strips markup and unescapes HTML
+ * entities (e.g. "Bob &amp; Co" -> "Bob & Co"), and collapses embedded line breaks to spaces.
+ * Shared by the task and expense-report branches of `getSections()` so both stay consistent.
+ */
+function getDecodedReportDisplayName(name: string | undefined): string {
+    return StringUtils.lineBreaksToSpaces(Parser.htmlToText(name ?? ''));
+}
+
+/**
  * @private
  * Organizes data into List Sections for display, for the TaskListItemType of Search Results.
  *
@@ -2593,8 +2602,8 @@ function getTaskSections(
             const report = getReportOrDraftReport(taskItem.reportID) ?? taskItem;
             const parentReport = getReportOrDraftReport(taskItem.parentReportID) ?? data[`${ONYXKEYS.COLLECTION.REPORT}${taskItem.parentReportID}`];
 
-            const reportName = StringUtils.lineBreaksToSpaces(Parser.htmlToText(taskItem.reportName));
-            const description = StringUtils.lineBreaksToSpaces(Parser.htmlToText(taskItem.description));
+            const reportName = getDecodedReportDisplayName(taskItem.reportName);
+            const description = getDecodedReportDisplayName(taskItem.description);
 
             const result: TaskListItemType = {
                 ...taskItem,
@@ -2951,6 +2960,7 @@ function getReportSections({
                 if (isIOUReport) {
                     reportIDToTransactions[reportKey].reportName = getIOUReportName(translate, convertToDisplayString, data, reportIDToTransactions[reportKey]);
                 }
+                reportIDToTransactions[reportKey].reportName = getDecodedReportDisplayName(reportIDToTransactions[reportKey].reportName);
             }
         } else if (isTransactionEntry(key)) {
             const transactionItem = {...data[key]};

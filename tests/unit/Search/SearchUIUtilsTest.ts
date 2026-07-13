@@ -2798,6 +2798,34 @@ describe('SearchUIUtils', () => {
             expect(result.find((item) => item.reportID === reportID2)?.pendingAction).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE);
         });
 
+        it('should decode HTML entities in the expense report name (regression test for #95808)', () => {
+            const localSearchResults: OnyxTypes.SearchResults['data'] = {
+                ...searchResults.data,
+                [`report_${reportID2}`]: {
+                    ...searchResults.data[`report_${reportID2}`],
+                    reportName: 'Bob &amp; Co &#39;Q3&#39;',
+                },
+            };
+
+            const result = getSectionsByType(
+                SearchUIUtils.getSections({
+                    type: CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT,
+                    data: localSearchResults,
+                    currentAccountID: 2074551,
+                    currentUserEmail: '',
+                    translate: translateLocal,
+                    formatPhoneNumber,
+                    bankAccountList: {},
+                    conciergeReportID: undefined,
+                    convertToDisplayString,
+                    reportAttributesDerivedValue: {},
+                }),
+                SearchUIUtils.isTransactionReportGroupListItemType,
+            )[0];
+
+            expect(result.find((item) => item.reportID === reportID2)?.reportName).toBe("Bob & Co 'Q3'");
+        });
+
         it('should use custom avatar from onyxPersonalDetailsList when search API personalDetailsList is absent', () => {
             // Reproduce the bug: the search API response does not include the report owner in
             // personalDetailsList (data.personalDetailsList is empty/undefined), so without the
