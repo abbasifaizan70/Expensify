@@ -8,7 +8,7 @@ import type handleWalletStatementNavigationDefault from '@components/WalletState
 import useAncestors from '@hooks/useAncestors';
 
 import markAllMessagesAsRead from '@libs/actions/Report/MarkAllMessageAsRead';
-import {CONCIERGE_RESPONSE_DELAY_MS, resolveSuggestedFollowup} from '@libs/actions/Report/SuggestedFollowup';
+import {applyPendingConciergeAction, CONCIERGE_RESPONSE_DELAY_MS, resolveSuggestedFollowup} from '@libs/actions/Report/SuggestedFollowup';
 import {getOnboardingMessages} from '@libs/actions/Welcome/OnboardingFlow';
 import * as API from '@libs/API';
 import {WRITE_COMMANDS} from '@libs/API/types';
@@ -16,7 +16,7 @@ import HttpUtils from '@libs/HttpUtils';
 import Navigation from '@libs/Navigation/Navigation';
 import {buildNextStepNew} from '@libs/NextStepUtils';
 import {getAccountIDsByLogins} from '@libs/PersonalDetailsUtils';
-import {getOriginalMessage, isDeletedAction} from '@libs/ReportActionsUtils';
+import {getOriginalMessage, getSortedReportActions, isDeletedAction} from '@libs/ReportActionsUtils';
 import playSound, {SOUNDS} from '@libs/Sound';
 
 import {toggleEmojiReaction} from '@userActions/EmojiReactions';
@@ -6431,6 +6431,88 @@ describe('actions/Report', () => {
             expect(userCommentAction?.created).toBeDefined();
             expect(pendingResponse?.reportAction.created).toBeDefined();
             expect(new Date(pendingResponse?.reportAction.created ?? 0).getTime()).toBeGreaterThan(new Date(userCommentAction?.created ?? 0).getTime());
+        });
+
+        it('keeps the Concierge reply ordered directly after its own question even when a second message is sent before the reply is revealed', async () => {
+            // Regression test for https://github.com/Expensify/App/issues/96101:
+            // clicking a suggested followup with a pre-generated response, then sending another
+            // message before the "Concierge is thinking..." delay elapses, must NOT cause the
+            // reply to render after that newer message once it's finally applied.
+            const reportAction = createMock<OnyxTypes.ReportAction>({
+                reportActionID: REPORT_ACTION_ID,
+                actorAccountID: CONST.ACCOUNT_ID.CONCIERGE,
+                message: [
+                    {
+                        html: '<p>Here is help</p><followup-list><followup><followup-text>How do I set up QuickBooks?</followup-text><followup-response>To set up QuickBooks, go to Settings...</followup-response></followup></followup-list>',
+                        text: 'Here is help',
+                        type: CONST.REPORT.MESSAGE.TYPE.COMMENT,
+                    },
+                ],
+            });
+
+            await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT}${REPORT_ID}`, report);
+            await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${REPORT_ID}`, {
+                [REPORT_ACTION_ID]: reportAction,
+            });
+            await waitForBatchedUpdates();
+
+            resolveSuggestedFollowup(
+                report,
+                undefined,
+                reportAction,
+                {text: 'How do I set up QuickBooks?', response: 'To set up QuickBooks, go to Settings...'},
+                CONST.DEFAULT_TIME_ZONE,
+                TEST_USER_ACCOUNT_ID,
+                TEST_USER_EMAIL,
+                undefined,
+                undefined,
+            );
+            await waitForBatchedUpdates();
+
+            const pendingResponse = await getOnyxValue(`${ONYXKEYS.COLLECTION.PENDING_CONCIERGE_RESPONSE}${REPORT_ID}` as const);
+            expect(pendingResponse).not.toBeNull();
+
+            const actionsAfterFirstQuestion = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${REPORT_ID}` as const);
+            const firstUserComment = Object.values(actionsAfterFirstQuestion ?? {}).find(
+                (action) => action?.reportActionID !== REPORT_ACTION_ID && action?.actorAccountID !== CONST.ACCOUNT_ID.CONCIERGE,
+            );
+            expect(firstUserComment).toBeDefined();
+
+            // Simulate the user sending a second, unrelated message partway through the display delay
+            // window (i.e. before applyPendingConciergeAction fires), timestamped 2s after the first
+            // comment — well inside the old 4s window that used to reproduce the bug.
+            const secondUserCommentID = 'second-user-comment';
+            const secondUserComment = createMock<OnyxTypes.ReportAction>({
+                reportActionID: secondUserCommentID,
+                actorAccountID: TEST_USER_ACCOUNT_ID,
+                created: DateUtils.addMillisecondsFromDateTime(firstUserComment?.created ?? '', 2000),
+                message: [{html: '<p>Does Expensify support Certinia?</p>', text: 'Does Expensify support Certinia?', type: CONST.REPORT.MESSAGE.TYPE.COMMENT}],
+            });
+            await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${REPORT_ID}`, {
+                [secondUserCommentID]: secondUserComment,
+            });
+            await waitForBatchedUpdates();
+
+            // Now the display delay elapses and the pending Concierge reply is merged in.
+            if (pendingResponse?.reportAction) {
+                applyPendingConciergeAction(REPORT_ID, pendingResponse.reportAction);
+            }
+            await waitForBatchedUpdates();
+
+            const finalActions = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${REPORT_ID}` as const);
+            const sortedActionIDs = getSortedReportActions(Object.values(finalActions ?? {}).filter(Boolean) as OnyxTypes.ReportAction[]).map((action) => action.reportActionID);
+
+            const firstQuestionIndex = sortedActionIDs.indexOf(firstUserComment?.reportActionID ?? '');
+            const replyIndex = sortedActionIDs.indexOf(pendingResponse?.reportAction.reportActionID ?? '');
+            const secondQuestionIndex = sortedActionIDs.indexOf(secondUserCommentID);
+
+            expect(firstQuestionIndex).toBeGreaterThanOrEqual(0);
+            expect(replyIndex).toBeGreaterThanOrEqual(0);
+            expect(secondQuestionIndex).toBeGreaterThanOrEqual(0);
+
+            // Expected order: question 1, its reply, then the newer unrelated message — never reply after question 2.
+            expect(firstQuestionIndex).toBeLessThan(replyIndex);
+            expect(replyIndex).toBeLessThan(secondQuestionIndex);
         });
 
         it('should emit Log.info followup_clicked telemetry when a suggested followup is resolved', async () => {

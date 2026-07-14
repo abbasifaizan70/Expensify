@@ -387,6 +387,8 @@ type AddCommentParams = {
     reportActionID?: string;
     delegateAccountID: number | undefined;
     conciergeReportID: string | undefined;
+    /** Explicit DB-formatted `created` timestamp for the comment, so a caller can anchor a related optimistic action to this exact value. */
+    created?: string;
 };
 
 type AddActionsParams = {
@@ -403,6 +405,8 @@ type AddActionsParams = {
     reportActionID?: string;
     delegateAccountID: number | undefined;
     conciergeReportID: string | undefined;
+    /** Explicit DB-formatted `created` timestamp for the comment, so a caller can anchor a related optimistic action to this exact value. */
+    created?: string;
 };
 
 type AddAttachmentWithCommentParams = {
@@ -848,6 +852,7 @@ function addActions({
     reportActionID,
     delegateAccountID,
     conciergeReportID,
+    created,
 }: AddActionsParams) {
     if (!report?.reportID) {
         return;
@@ -871,7 +876,7 @@ function addActions({
 
     const attachmentID = rand64();
     if (text && !file) {
-        const reportComment = buildOptimisticAddCommentReportAction({text, reportID, reportActionID, delegateAccountIDParam: delegateAccountID});
+        const reportComment = buildOptimisticAddCommentReportAction({text, reportID, reportActionID, delegateAccountIDParam: delegateAccountID, created});
         reportCommentAction = reportComment.reportAction;
         reportCommentText = reportComment.commentText;
     }
@@ -1189,6 +1194,7 @@ function addComment({
     reportActionID,
     delegateAccountID,
     conciergeReportID,
+    created,
 }: AddCommentParams) {
     if (shouldPlaySound) {
         playSound(SOUNDS.DONE);
@@ -1206,6 +1212,7 @@ function addComment({
         delegateAccountID,
         sidePanelContext,
         conciergeReportID,
+        created,
     });
 }
 

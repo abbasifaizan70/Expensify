@@ -1,4 +1,6 @@
+import DateUtils from '@libs/DateUtils';
 import Log from '@libs/Log';
+import {getDBTimeWithSkew} from '@libs/NetworkState';
 import {rand64} from '@libs/NumberUtils';
 import type {Followup} from '@libs/ReportActionFollowupUtils';
 import type {Ancestor, OptimisticReportAction} from '@libs/ReportUtils';
@@ -17,6 +19,19 @@ import {addComment, buildOptimisticResolvedFollowups} from '.';
 
 /** Delay before showing pre-generated Concierge response (in milliseconds) */
 const CONCIERGE_RESPONSE_DELAY_MS = 4000;
+
+/**
+ * Offset (in milliseconds) used only to order the optimistic Concierge reply's `created` timestamp
+ * immediately after the user's own comment. This is intentionally decoupled from CONCIERGE_RESPONSE_DELAY_MS,
+ * which controls how long the reply is visually held back before it's revealed (see
+ * addOptimisticConciergeActionWithDelay/displayAfter below) — the reveal delay has no bearing on where the
+ * reply belongs in chronological order.
+ *
+ * A tiny offset is safe here (unlike the previous 1ms attempt referenced in git history) because both the
+ * user's comment and this reply are derived from the *same* clock reading (see `userCommentCreated` below),
+ * so there is no race between two independent `Date.now()` calls to guard against.
+ */
+const CONCIERGE_RESPONSE_SORT_OFFSET_MS = 1;
 
 /**
  * Resolves a suggested followup by posting the selected question as a comment
@@ -87,13 +102,17 @@ function resolveSuggestedFollowup(
     // If there's a pre-generated response, queue it for delayed display.
     const optimisticConciergeReportActionID = rand64();
 
-    // Use the full delay as createdOffset so the Concierge response timestamp is
-    // strictly after the user's comment — a 1ms offset was not enough to guarantee
-    // correct sort order when both actions are queued to Onyx near-simultaneously.
+    // Anchor both the user's comment and the Concierge reply to a single clock reading so their relative
+    // order is guaranteed by construction rather than by racing two independent Date.now() calls (which is
+    // what the previous 1ms-offset attempt got wrong — see CONCIERGE_RESPONSE_SORT_OFFSET_MS above).
+    // Any message the user sends later — including one sent while this reply is still pending display —
+    // is stamped at its own real send time, which by definition comes after userCommentCreated, so it
+    // will always sort after both the question and its reply, no matter how long the display delay runs.
+    const userCommentCreated = getDBTimeWithSkew();
     const optimisticConciergeAction = buildOptimisticAddCommentReportAction({
         text: selectedFollowup.response,
         actorAccountID: CONST.ACCOUNT_ID.CONCIERGE,
-        createdOffset: CONCIERGE_RESPONSE_DELAY_MS,
+        created: DateUtils.addMillisecondsFromDateTime(userCommentCreated, CONCIERGE_RESPONSE_SORT_OFFSET_MS),
         reportActionID: optimisticConciergeReportActionID,
         reportID,
         isHTML: true,
@@ -102,7 +121,7 @@ function resolveSuggestedFollowup(
         delegateAccountIDParam: delegateAccountID,
     });
 
-    // Post user's comment immediately
+    // Post user's comment immediately, using the same base timestamp the Concierge reply was anchored to.
     addComment({
         report,
         notifyReportID: notifyReportID ?? reportID,
@@ -112,6 +131,7 @@ function resolveSuggestedFollowup(
         currentUserAccountID,
         shouldPlaySound: false,
         isInSidePanel: false,
+        created: userCommentCreated,
         pregeneratedResponseParams: {
             optimisticConciergeReportActionID,
             optimisticConciergeCreated: optimisticConciergeAction.reportAction.created,

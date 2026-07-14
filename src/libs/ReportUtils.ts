@@ -342,6 +342,12 @@ type BuildOptimisticAddCommentReportActionParams = {
     file?: FileObject;
     actorAccountID?: number;
     createdOffset?: number;
+    /**
+     * Explicit DB-formatted timestamp to use for this action's `created` value, taking precedence over `createdOffset`.
+     * Lets callers anchor two related optimistic actions (e.g. a user comment and a reply to it) to the exact same
+     * clock reading instead of each computing its own `Date.now()`, which removes any race between the two.
+     */
+    created?: string;
     reportID?: string;
     reportActionID?: string;
     attachmentID?: string;
@@ -6349,6 +6355,7 @@ function buildOptimisticAddCommentReportAction({
     file,
     actorAccountID,
     createdOffset = 0,
+    created,
     reportID,
     reportActionID = rand64(),
     attachmentID,
@@ -6386,7 +6393,7 @@ function buildOptimisticAddCommentReportAction({
             ],
             automatic: false,
             avatar: allPersonalDetails?.[accountID]?.avatar,
-            created: getDBTimeWithSkew(Date.now() + createdOffset),
+            created: created ?? getDBTimeWithSkew(Date.now() + createdOffset),
             message: [
                 {
                     translationKey: isAttachmentOnly ? CONST.TRANSLATION_KEYS.ATTACHMENT : '',
