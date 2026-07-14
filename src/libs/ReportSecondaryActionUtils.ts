@@ -457,7 +457,15 @@ function isCancelPaymentAction(
     return isPaymentProcessing && !hasDailyNachaCutoffPassed;
 }
 
-function isReceivedPaymentAction(report: Report, reportTransactions: Transaction[] = [], reportActions: ReportAction[] = [], policy?: Policy): boolean {
+function isReceivedPaymentAction(
+    report: Report,
+    reportTransactions: Transaction[] = [],
+    reportActions: ReportAction[] = [],
+    policy?: Policy,
+    currentUserAccountID?: number,
+    currentUserLogin?: string,
+    bankAccountList?: OnyxEntry<BankAccountList>,
+): boolean {
     if (!isExpenseReportUtils(report) || !isCurrentUserSubmitter(report)) {
         return false;
     }
@@ -471,7 +479,13 @@ function isReceivedPaymentAction(report: Report, reportTransactions: Transaction
         return true;
     }
 
-    if (policy?.role === CONST.POLICY.ROLE.ADMIN) {
+    // Admins normally settle via the Pay action instead of Received payment. But an admin should only be
+    // excluded here when they can actually execute Pay for this report themselves (bank account configured,
+    // designated reimburser, etc - see isPayerUtils). If payments are disabled, or payments are enabled but
+    // this particular admin has no viable pay path (e.g. a different reimburser is designated), excluding them
+    // leaves the admin-submitter with no way to settle the report at all.
+    const isReportPayer = isPayerUtils(currentUserAccountID, currentUserLogin, report, bankAccountList, policy, false);
+    if (policy?.role === CONST.POLICY.ROLE.ADMIN && isReportPayer) {
         return false;
     }
 
@@ -1012,7 +1026,7 @@ function getSecondaryReportActions({
         options.push(CONST.REPORT.SECONDARY_ACTIONS.APPROVE);
     }
 
-    if (isReceivedPaymentAction(report, reportTransactions, reportActions, policy)) {
+    if (isReceivedPaymentAction(report, reportTransactions, reportActions, policy, currentUserAccountID, currentUserLogin, bankAccountList)) {
         options.push(CONST.REPORT.SECONDARY_ACTIONS.RECEIVED_PAYMENT);
     }
 
