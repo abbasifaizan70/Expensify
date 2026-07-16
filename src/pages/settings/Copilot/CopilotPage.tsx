@@ -10,11 +10,13 @@ import PopoverMenu from '@components/PopoverMenu';
 import type {PopoverMenuItem} from '@components/PopoverMenu';
 import ScreenWrapper from '@components/ScreenWrapper';
 import ScrollView from '@components/ScrollView';
+import SearchBar from '@components/SearchBar';
 import Section from '@components/Section';
 import Text from '@components/Text';
 import TextLink from '@components/TextLink';
 
 import useConfirmModal from '@hooks/useConfirmModal';
+import useDebouncedState from '@hooks/useDebouncedState';
 import useDocumentTitle from '@hooks/useDocumentTitle';
 import {useMemoizedLazyExpensifyIcons, useMemoizedLazyIllustrations} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
@@ -30,6 +32,7 @@ import getClickedTargetLocation from '@libs/getClickedTargetLocation';
 import Navigation from '@libs/Navigation/Navigation';
 import {sortAlphabetically} from '@libs/OptionsListUtils';
 import {useIsAgentAccount} from '@libs/SessionUtils';
+import tokenizedSearch from '@libs/tokenizedSearch';
 import {getDefaultAvatarURL} from '@libs/UserAvatarUtils';
 
 import type {AnchorPosition} from '@styles/index';
@@ -117,6 +120,13 @@ function CopilotPage() {
     const {showDelegateNoAccessModal} = useDelegateNoAccessActions();
     const delegates = account?.delegatedAccess?.delegates ?? [];
     const delegators = account?.delegatedAccess?.delegators ?? [];
+
+    const [searchValue, debouncedSearchValue, setSearchValue] = useDebouncedState('');
+
+    // Show one search input when the combined number of displayed copilots (accounts with access to/from this account)
+    // reaches the standard threshold, matching the rest of the app
+    const displayedDelegatesCount = delegates.filter((d) => !d.optimisticAccountID).length;
+    const shouldShowSearchInput = displayedDelegatesCount + delegators.length >= CONST.STANDARD_LIST_ITEM_LIMIT;
 
     const hasDelegators = delegators.length > 0;
     const hasDelegates = delegates.length > 0;
@@ -206,7 +216,8 @@ function CopilotPage() {
             'sortKey',
             localeCompare,
         );
-        return sortedDelegates.map(({email, role, pendingAction, pendingFields}) => {
+        const filteredDelegates = shouldShowSearchInput ? tokenizedSearch(sortedDelegates, debouncedSearchValue, (d) => [d.sortKey ?? '', formatPhoneNumber(d.email)]) : sortedDelegates;
+        return filteredDelegates.map(({email, role, pendingAction, pendingFields}) => {
             const personalDetail = personalDetailsByLogin[email.toLowerCase()];
             const addDelegateErrors = errorFields?.addDelegate?.[email];
             const error = getLatestError(addDelegateErrors);
@@ -265,6 +276,8 @@ function CopilotPage() {
         renderTitleWithRole,
         isAgentAccount,
         actingDelegateEmail,
+        shouldShowSearchInput,
+        debouncedSearchValue,
     ]);
 
     const sortedDelegators = sortAlphabetically(
@@ -272,7 +285,8 @@ function CopilotPage() {
         'sortKey',
         localeCompare,
     );
-    const delegatorMenuItems: MenuItemProps[] = sortedDelegators.map(({email, role, pendingAction}) => {
+    const filteredDelegators = shouldShowSearchInput ? tokenizedSearch(sortedDelegators, debouncedSearchValue, (d) => [d.sortKey ?? '', formatPhoneNumber(d.email)]) : sortedDelegators;
+    const delegatorMenuItems: MenuItemProps[] = filteredDelegators.map(({email, role, pendingAction}) => {
         const personalDetail = personalDetailsByLogin[email.toLowerCase()];
         const formattedEmail = formatPhoneNumber(email);
         const connectError = getLatestError(errorFields?.connect?.[email]);
@@ -443,15 +457,25 @@ function CopilotPage() {
                                 titleStyles={styles.accountSettingsSectionTitle}
                                 childrenStyles={styles.pt5}
                             >
-                                {hasDelegators && (
+                                {shouldShowSearchInput && (
+                                    <SearchBar
+                                        label={translate('workspace.people.findMember')}
+                                        inputValue={searchValue}
+                                        onChangeText={setSearchValue}
+                                        shouldShowEmptyState={delegatorMenuItems.length === 0 && delegateMenuItems.length === 0}
+                                    />
+                                )}
+                                {hasDelegators && delegatorMenuItems.length > 0 && (
                                     <>
                                         <Text style={[styles.textLabelSupporting, styles.pv1]}>{translate('delegate.youCanAccessTheseAccounts')}</Text>
                                         <MenuItemList menuItems={delegatorMenuItems} />
                                     </>
                                 )}
-                                {hasDelegates && (
+                                {hasDelegates && delegateMenuItems.length > 0 && (
                                     <>
-                                        <Text style={[styles.textLabelSupporting, styles.pv1, hasDelegators && styles.mt5]}>{translate('delegate.membersCanAccessYourAccount')}</Text>
+                                        <Text style={[styles.textLabelSupporting, styles.pv1, delegatorMenuItems.length > 0 && styles.mt5]}>
+                                            {translate('delegate.membersCanAccessYourAccount')}
+                                        </Text>
                                         <MenuItemList menuItems={delegateMenuItems} />
                                     </>
                                 )}

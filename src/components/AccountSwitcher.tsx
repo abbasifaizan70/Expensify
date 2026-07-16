@@ -1,10 +1,10 @@
 import useConfirmModal from '@hooks/useConfirmModal';
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
+import useDebouncedState from '@hooks/useDebouncedState';
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
 import useNetwork from '@hooks/useNetwork';
 import useOnyx from '@hooks/useOnyx';
-import useResponsiveLayout from '@hooks/useResponsiveLayout';
 import useTheme from '@hooks/useTheme';
 import useThemeStyles from '@hooks/useThemeStyles';
 import useWindowDimensions from '@hooks/useWindowDimensions';
@@ -15,6 +15,7 @@ import {getLatestError} from '@libs/ErrorUtils';
 import {getGpsPoints, stopGpsTrip} from '@libs/GPSDraftDetailsUtils';
 import {sortAlphabetically} from '@libs/OptionsListUtils';
 import {getPersonalDetailByEmail} from '@libs/PersonalDetailsUtils';
+import tokenizedSearch from '@libs/tokenizedSearch';
 
 import TextWithEmojiFragment from '@pages/inbox/report/comment/TextWithEmojiFragment';
 
@@ -31,17 +32,25 @@ import {Str} from 'expensify-common';
 import React, {useRef, useState} from 'react';
 import {View} from 'react-native';
 
-import type {PopoverMenuItem} from './PopoverMenu';
+import type {ListItem} from './SelectionList/types';
 
 import Avatar from './Avatar';
+import Badge from './Badge';
 import Icon from './Icon';
 import {ModalActions} from './Modal/Global/ModalContext';
-import PopoverMenu from './PopoverMenu';
+import PopoverWithMeasuredContent from './PopoverWithMeasuredContent';
 import {PressableWithFeedback} from './Pressable';
 import {useProductTrainingContext} from './ProductTrainingContext';
+import SelectionList from './SelectionList';
+import SingleSelectWithAvatarListItem from './SelectionList/ListItem/SingleSelectWithAvatarListItem';
 import Text from './Text';
 import Tooltip from './Tooltip';
 import EducationalTooltip from './Tooltip/EducationalTooltip';
+
+type SwitcherListItem = ListItem & {
+    /** Called when the row is selected */
+    onSelected?: () => void;
+};
 
 type AccountSwitcherProps = {
     /* Whether the screen is focused. Used to hide the product training tooltip */
@@ -55,7 +64,6 @@ function AccountSwitcher({isScreenFocused}: AccountSwitcherProps) {
     const theme = useTheme();
     const {localeCompare, translate, formatPhoneNumber} = useLocalize();
     const {isOffline} = useNetwork();
-    const {shouldUseNarrowLayout} = useResponsiveLayout();
     const [account] = useOnyx(ONYXKEYS.ACCOUNT);
     const [accountID] = useOnyx(ONYXKEYS.SESSION, {selector: accountIDSelector});
     const [isDebugModeEnabled] = useOnyx(ONYXKEYS.IS_DEBUG_MODE_ENABLED);
@@ -71,6 +79,7 @@ function AccountSwitcher({isScreenFocused}: AccountSwitcherProps) {
     const {windowHeight} = useWindowDimensions();
 
     const [shouldShowDelegatorMenu, setShouldShowDelegatorMenu] = useState(false);
+    const [searchValue, debouncedSearchValue, setSearchValue] = useDebouncedState('');
     const delegators = account?.delegatedAccess?.delegators ?? [];
 
     const isActingAsDelegate = !!account?.delegatedAccess?.delegate;
@@ -138,44 +147,47 @@ function AccountSwitcher({isScreenFocused}: AccountSwitcherProps) {
               shouldRender: canSwitchAccounts,
           };
 
-    const createBaseMenuItem = (
-        personalDetails: PersonalDetails | undefined,
-        errors?: Errors,
-        additionalProps: Partial<Omit<PopoverMenuItem, 'icon' | 'iconType'>> = {},
-    ): PopoverMenuItem => {
-        const error = Object.values(errors ?? {}).at(0) ?? '';
+    // Show the search input once the copilot count reaches the standard threshold, matching the rest of the app
+    const shouldShowSearchInput = !isActingAsDelegate && delegators.length >= CONST.STANDARD_LIST_ITEM_LIMIT;
+
+    const createBaseListItem = (personalDetails: PersonalDetails | undefined, errors?: Errors, additionalProps: Partial<SwitcherListItem> = {}): SwitcherListItem => {
+        const login = personalDetails?.login ?? '';
         return {
-            text: formatPhoneNumber(personalDetails?.displayName ?? personalDetails?.login ?? ''),
-            description: Str.removeSMSDomain(personalDetails?.login ?? ''),
-            avatarID: personalDetails?.accountID ?? CONST.DEFAULT_NUMBER_ID,
-            icon: personalDetails?.avatar ?? '',
-            iconType: CONST.ICON_TYPE_AVATAR,
-            outerWrapperStyle: shouldUseNarrowLayout ? {} : styles.accountSwitcherPopover,
-            shouldIgnoreCompactStyle: true,
-            numberOfLinesDescription: 1,
-            errorText: error ?? '',
-            shouldShowRedDotIndicator: !!error,
-            errorTextStyle: styles.mt2,
+            text: formatPhoneNumber(personalDetails?.displayName ?? login),
+            alternateText: Str.removeSMSDomain(login),
+            keyForList: login || String(personalDetails?.accountID ?? CONST.DEFAULT_NUMBER_ID),
+            login,
+            accountID: personalDetails?.accountID ?? CONST.DEFAULT_NUMBER_ID,
+            icons: [
+                {
+                    source: personalDetails?.avatar ?? '',
+                    name: personalDetails?.displayName ?? login,
+                    type: CONST.ICON_TYPE_AVATAR,
+                    id: personalDetails?.accountID,
+                    fallbackIcon: personalDetails?.fallbackIcon,
+                },
+            ],
+            errors,
             ...additionalProps,
         };
     };
 
-    const menuItems = (): PopoverMenuItem[] => {
-        const currentUserMenuItem = createBaseMenuItem(currentUserPersonalDetails, undefined, {isSelected: true});
+    const getSwitcherItems = (): SwitcherListItem[] => {
+        const currentUserItem = createBaseListItem(currentUserPersonalDetails, undefined, {isSelected: true});
 
         if (isActingAsDelegate) {
             const delegateEmail = account?.delegatedAccess?.delegate ?? '';
 
             // Avoid duplicating the current user in the list when switching accounts
             if (delegateEmail === currentUserPersonalDetails.login) {
-                return [currentUserMenuItem];
+                return [currentUserItem];
             }
 
             const delegatePersonalDetails = getPersonalDetailByEmail(delegateEmail);
             const error = getLatestError(account?.delegatedAccess?.errorFields?.disconnect);
 
             return [
-                createBaseMenuItem(delegatePersonalDetails, error, {
+                createBaseListItem(delegatePersonalDetails ?? ({login: delegateEmail} as PersonalDetails), error, {
                     onSelected: () => {
                         if (isOffline) {
                             close(showOfflineModal);
@@ -190,19 +202,20 @@ function AccountSwitcher({isScreenFocused}: AccountSwitcherProps) {
                         disconnect({stashedCredentials, stashedSession});
                     },
                 }),
-                currentUserMenuItem,
+                currentUserItem,
             ];
         }
 
-        const delegatorMenuItems: PopoverMenuItem[] = sortAlphabetically(
+        const delegatorItems: SwitcherListItem[] = sortAlphabetically(
             delegators
                 .filter(({email}) => email !== currentUserPersonalDetails.login)
                 .map(({email, role}) => {
                     const errorFields = account?.delegatedAccess?.errorFields ?? {};
                     const error = getLatestError(errorFields?.connect?.[email]);
                     const personalDetails = getPersonalDetailByEmail(email);
-                    return createBaseMenuItem(personalDetails, error, {
-                        badgeText: translate('delegate.role', {role}),
+                    // Fall back to the delegator's email so the row stays labeled (and searchable) even before personal details load
+                    return createBaseListItem(personalDetails ?? ({login: email} as PersonalDetails), error, {
+                        rightElement: <Badge text={translate('delegate.role', {role})} />,
                         onSelected: () => {
                             if (isOffline) {
                                 close(showOfflineModal);
@@ -220,11 +233,18 @@ function AccountSwitcher({isScreenFocused}: AccountSwitcherProps) {
             localeCompare,
         );
 
-        return [currentUserMenuItem, ...delegatorMenuItems];
+        // Filter only the delegator rows so the current-user row stays pinned at the top
+        const filteredDelegatorItems = shouldShowSearchInput ? tokenizedSearch(delegatorItems, debouncedSearchValue, (item) => [item.text ?? '', item.alternateText ?? '']) : delegatorItems;
+
+        return [currentUserItem, ...filteredDelegatorItems];
     };
+
+    const switcherItems = getSwitcherItems();
+    const headerMessage = shouldShowSearchInput && !!debouncedSearchValue.trim() && switcherItems.length === 1 ? translate('common.noResultsFound') : undefined;
 
     const hideDelegatorMenu = () => {
         setShouldShowDelegatorMenu(false);
+        setSearchValue('');
         clearDelegatorErrors({delegatedAccess: account?.delegatedAccess});
     };
 
@@ -297,26 +317,47 @@ function AccountSwitcher({isScreenFocused}: AccountSwitcherProps) {
             </TooltipToRender>
 
             {!!canSwitchAccounts && (
-                <PopoverMenu
+                <PopoverWithMeasuredContent
                     isVisible={shouldShowDelegatorMenu}
                     onClose={hideDelegatorMenu}
-                    onItemSelected={hideDelegatorMenu}
                     anchorRef={buttonRef}
                     anchorPosition={CONST.POPOVER_ACCOUNT_SWITCHER_POSITION}
                     anchorAlignment={{
                         horizontal: CONST.MODAL.ANCHOR_ORIGIN_HORIZONTAL.LEFT,
                         vertical: CONST.MODAL.ANCHOR_ORIGIN_VERTICAL.TOP,
                     }}
-                    menuItems={menuItems()}
-                    headerText={translate('delegate.switchAccount')}
-                    containerStyles={[{maxHeight: windowHeight / 2}, styles.mw100, shouldUseNarrowLayout ? {} : styles.wFitContent]}
-                    headerStyles={styles.pt0}
-                    innerContainerStyle={styles.pb0}
-                    shouldUseScrollView
-                    shouldUpdateFocusedIndex={false}
-                    enableEdgeToEdgeBottomSafeAreaPadding
-                    shouldShowRadioButton
-                />
+                    popoverDimensions={{width: CONST.POPOVER_DROPDOWN_WIDTH, height: Math.min(windowHeight / 2, CONST.POPOVER_DROPDOWN_MAX_HEIGHT)}}
+                    shouldSwitchPositionIfOverflow
+                    shouldEnableNewFocusManagement
+                >
+                    <View
+                        style={[
+                            shouldShowSearchInput ? {height: Math.min(windowHeight / 2, CONST.POPOVER_DROPDOWN_MAX_HEIGHT)} : {maxHeight: windowHeight / 2},
+                            styles.flexColumn,
+                            {width: CONST.POPOVER_DROPDOWN_WIDTH},
+                            styles.mw100,
+                        ]}
+                    >
+                        <Text style={[styles.createMenuHeaderText, styles.ph5, styles.pv3]}>{translate('delegate.switchAccount')}</Text>
+                        <SelectionList
+                            data={switcherItems}
+                            ListItem={SingleSelectWithAvatarListItem}
+                            onSelectRow={(item) => {
+                                hideDelegatorMenu();
+                                item.onSelected?.();
+                            }}
+                            shouldShowTextInput={shouldShowSearchInput}
+                            textInputOptions={{
+                                value: searchValue,
+                                label: translate('workspace.people.findMember'),
+                                onChangeText: setSearchValue,
+                                headerMessage,
+                            }}
+                            shouldSingleExecuteRowSelect
+                            addBottomSafeAreaPadding
+                        />
+                    </View>
+                </PopoverWithMeasuredContent>
             )}
         </>
     );
