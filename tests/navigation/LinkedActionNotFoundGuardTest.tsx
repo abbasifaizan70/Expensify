@@ -235,4 +235,33 @@ describe('LinkedActionNotFoundGuard', () => {
         // Should not navigate away while loading — the action might come back
         expect(mockSetParams).not.toHaveBeenCalled();
     });
+
+    // Regression test for #96314: a deep link to an already-deleted / non-existent action (never visible
+    // this mount) must show and KEEP showing the "not here" page instead of auto-navigating away, which
+    // previously caused the page to only flash briefly (and silently redirect self-DM deep links to the chat).
+    it('does not auto-navigate away for a deep link to a never-visible action once loading completes', () => {
+        // Action is missing from the start and a loading cycle is in progress (mirrors openReport's optimistic update)
+        mockLinkedAction = null;
+        mockIsLoadingInitialReportActions = true;
+
+        const {rerender} = render(
+            <LinkedActionNotFoundGuard>
+                <TestChildren />
+            </LinkedActionNotFoundGuard>,
+        );
+
+        // Loading completes and the action is still missing -> the "not here" page should now show
+        act(() => {
+            mockIsLoadingInitialReportActions = false;
+        });
+
+        rerender(
+            <LinkedActionNotFoundGuard>
+                <TestChildren />
+            </LinkedActionNotFoundGuard>,
+        );
+
+        // The not-found page must remain — the guard must NOT strip reportActionID (no auto-navigate away).
+        expect(mockSetParams).not.toHaveBeenCalled();
+    });
 });
