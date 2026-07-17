@@ -6112,6 +6112,7 @@ _如需更详细的说明，请[访问我们的帮助网站](${CONST.NETSUITE_IM
             importedFromAccountingSoftware: '标签在你的…中进行管理',
             employeesSeeTagsAs: '员工看到标签为',
             glCode: '总账科目代码',
+            showGLCode: '选择标签时显示总账科目代码',
             updateGLCodeFailureMessage: '更新总账科目代码时出错，请重试',
             tagRules: '标签规则',
             approverDescription: '审批人',

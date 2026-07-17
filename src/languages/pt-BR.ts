@@ -6293,6 +6293,7 @@ _Para instruções mais detalhadas, [visite nossa central de ajuda](${CONST.NETS
             importedFromAccountingSoftware: 'As tags são gerenciadas em seu',
             employeesSeeTagsAs: 'Funcionários veem tags como',
             glCode: 'Código contábil',
+            showGLCode: 'Mostrar o código contábil ao selecionar uma tag',
             updateGLCodeFailureMessage: 'Ocorreu um erro ao atualizar o código GL, tente novamente',
             tagRules: 'Regras de tag',
             approverDescription: 'Aprovador',

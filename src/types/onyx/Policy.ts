@@ -2587,6 +2587,9 @@ type Policy = OnyxCommon.OnyxValueWithOfflineFeedback<
         /** Whether new transactions need to be tagged */
         requiresTag?: boolean;
 
+        /** Whether the tag's GL code should be appended to the tag name when selecting a tag */
+        shouldShowTagGLCode?: boolean;
+
         /** Whether new transactions need to be categorized */
         requiresCategory?: boolean;
 

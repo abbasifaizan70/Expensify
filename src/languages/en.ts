@@ -6412,6 +6412,7 @@ const translations = {
             importedFromAccountingSoftware: 'Tags are managed in your',
             employeesSeeTagsAs: 'Employees see tags as',
             glCode: 'GL code',
+            showGLCode: 'Show GL code when selecting a tag',
             updateGLCodeFailureMessage: 'An error occurred while updating the GL code, please try again',
             tagRules: 'Tag rules',
             approverDescription: 'Approver',

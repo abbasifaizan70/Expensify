@@ -6281,6 +6281,7 @@ _Aby uzyskać bardziej szczegółowe instrukcje, [odwiedź naszą stronę pomocy
             importedFromAccountingSoftware: 'Tagi są zarządzane w twoim',
             employeesSeeTagsAs: 'Pracownicy widzą tagi jako',
             glCode: 'Kod księgi głównej',
+            showGLCode: 'Pokaż kod księgi głównej przy wyborze tagu',
             updateGLCodeFailureMessage: 'Wystąpił błąd podczas aktualizowania kodu GL, spróbuj ponownie',
             tagRules: 'Zasady tagów',
             approverDescription: 'Osoba zatwierdzająca',

@@ -6330,6 +6330,7 @@ _Für ausführlichere Anweisungen [besuchen Sie unsere Hilfeseite](${CONST.NETSU
             importedFromAccountingSoftware: 'Tags werden in Ihrem',
             employeesSeeTagsAs: 'Mitarbeitende sehen Tags als',
             glCode: 'Hauptbuchcode',
+            showGLCode: 'Hauptbuchcode bei der Auswahl eines Tags anzeigen',
             updateGLCodeFailureMessage: 'Beim Aktualisieren des Hauptbuchcodes ist ein Fehler aufgetreten, bitte versuche es erneut.',
             tagRules: 'Tag-Regeln',
             approverDescription: 'Genehmiger',

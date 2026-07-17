@@ -6300,6 +6300,7 @@ _Voor meer gedetailleerde instructies, [bezoek onze help-site](${CONST.NETSUITE_
             importedFromAccountingSoftware: 'Tags worden beheerd in je',
             employeesSeeTagsAs: 'Werknemers zien tags als',
             glCode: 'Grootboekcode',
+            showGLCode: 'Grootboekcode tonen bij het selecteren van een tag',
             updateGLCodeFailureMessage: 'Er is een fout opgetreden bij het bijwerken van de GL-code, probeer het opnieuw.',
             tagRules: 'Tagregels',
             approverDescription: 'Fiatteur',

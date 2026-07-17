@@ -259,6 +259,7 @@ export type {default as SetWorkspaceReimbursementParams} from './SetWorkspaceRei
 export type {default as SetWorkspaceDefaultSpendCategoryParams} from './SetWorkspaceDefaultSpendCategoryParams';
 export type {default as SetPolicyRequiresTag} from './SetPolicyRequiresTag';
 export type {default as SetPolicyTagsRequired} from './SetPolicyTagsRequired';
+export type {default as SetPolicyTagGLCodeVisibilityParams} from './SetPolicyTagGLCodeVisibilityParams';
 export type {default as SetPolicyTagListsRequired} from './SetPolicyTagListsRequired';
 export type {default as RenamePolicyTagListParams} from './RenamePolicyTagListParams';
 export type {default as SwitchToOldDotParams} from './SwitchToOldDotParams';

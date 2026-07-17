@@ -11,6 +11,7 @@ import type {
     RenamePolicyTagListParams,
     RenamePolicyTagsParams,
     SetPolicyTagApproverParams,
+    SetPolicyTagGLCodeVisibilityParams,
     SetPolicyTagListsRequired,
     SetPolicyTagsEnabled,
     SetPolicyTagsRequired,
@@ -1157,6 +1158,55 @@ function setPolicyTagsRequired(policyData: PolicyData, requiresTag: boolean, tag
     API.write(WRITE_COMMANDS.SET_POLICY_TAGS_REQUIRED, parameters, onyxData);
 }
 
+/**
+ * Toggles whether a tag's GL code is appended to the tag name when selecting a tag (e.g. "Sunshine Project (SP4100)").
+ */
+function setPolicyTagGLCodeVisibility(policyData: PolicyData, shouldShowTagGLCode: boolean) {
+    const policyID = policyData.policy?.id;
+
+    const onyxData: OnyxData<typeof ONYXKEYS.COLLECTION.POLICY> = {
+        optimisticData: [
+            {
+                onyxMethod: Onyx.METHOD.MERGE,
+                key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                value: {
+                    shouldShowTagGLCode,
+                    errorFields: {shouldShowTagGLCode: null},
+                    pendingFields: {shouldShowTagGLCode: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE},
+                },
+            },
+        ],
+        successData: [
+            {
+                onyxMethod: Onyx.METHOD.MERGE,
+                key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                value: {
+                    errorFields: {shouldShowTagGLCode: null},
+                    pendingFields: {shouldShowTagGLCode: null},
+                },
+            },
+        ],
+        failureData: [
+            {
+                onyxMethod: Onyx.METHOD.MERGE,
+                key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                value: {
+                    shouldShowTagGLCode: !shouldShowTagGLCode,
+                    errorFields: {shouldShowTagGLCode: ErrorUtils.getMicroSecondOnyxErrorWithTranslationKey('workspace.tags.genericFailureMessage')},
+                    pendingFields: {shouldShowTagGLCode: null},
+                },
+            },
+        ],
+    };
+
+    const parameters: SetPolicyTagGLCodeVisibilityParams = {
+        policyID,
+        shouldShowTagGLCode,
+    };
+
+    API.write(WRITE_COMMANDS.SET_POLICY_TAG_GL_CODE_VISIBILITY, parameters, onyxData);
+}
+
 type SetPolicyTagGLCodeProps = {
     policyID: string;
     tagName: string;
@@ -1358,6 +1408,7 @@ export {
     renamePolicyTagList,
     setWorkspaceTagEnabled,
     setPolicyTagGLCode,
+    setPolicyTagGLCodeVisibility,
     setPolicyTagApprover,
     importPolicyTags,
     downloadTagsCSV,

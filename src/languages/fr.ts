@@ -6357,6 +6357,7 @@ _Pour des instructions plus détaillées, [visitez notre site d’aide](${CONST.
             importedFromAccountingSoftware: 'Les tags sont gérés dans votre',
             employeesSeeTagsAs: 'Les employés voient les tags comme',
             glCode: 'Code de grand livre',
+            showGLCode: "Afficher le code de grand livre lors de la sélection d'un tag",
             updateGLCodeFailureMessage: "Une erreur s'est produite lors de la mise à jour du code GL, veuillez réessayer.",
             tagRules: 'Règles de tags',
             approverDescription: 'Approbateur',

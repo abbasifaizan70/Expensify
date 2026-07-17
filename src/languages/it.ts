@@ -6317,6 +6317,7 @@ _Per istruzioni più dettagliate, [visita il nostro sito di assistenza](${CONST.
             importedFromAccountingSoftware: 'I tag sono gestiti nelle tue',
             employeesSeeTagsAs: 'I dipendenti vedono le etichette come',
             glCode: 'Codice CO',
+            showGLCode: "Mostra il codice CO quando selezioni un'etichetta",
             updateGLCodeFailureMessage: 'Si è verificato un errore durante l’aggiornamento del codice GL, riprova',
             tagRules: 'Regole dei tag',
             approverDescription: 'Approvante',

@@ -6237,6 +6237,7 @@ _詳しい手順については、[ヘルプサイトをご覧ください](${CO
             importedFromAccountingSoftware: 'タグは次の場所で管理できます:',
             employeesSeeTagsAs: '従業員にはタグが次のように表示されます',
             glCode: 'GLコード',
+            showGLCode: 'タグを選択するときにGLコードを表示する',
             updateGLCodeFailureMessage: 'GLコードの更新中にエラーが発生しました。もう一度お試しください',
             tagRules: 'タグルール',
             approverDescription: '承認者',
