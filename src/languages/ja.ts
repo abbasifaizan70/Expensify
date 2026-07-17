@@ -3562,6 +3562,7 @@ ${integrationName === CONST.ONBOARDING_ACCOUNTING_MAPPING.other ? 'あなたの'
         title: ({isBreakLine}: {isBreakLine: boolean}) => `おっと… ${isBreakLine ? '\n' : ''}問題が発生しました`,
         subtitle: 'リクエストを完了できませんでした。後でもう一度お試しください。',
         wrongTypeSubtitle: 'その検索は無効です。検索条件を調整してみてください。',
+        retry: '再試行',
     },
     statusPage: {
         status: 'ステータス',

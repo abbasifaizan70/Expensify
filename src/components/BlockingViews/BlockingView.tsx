@@ -54,6 +54,9 @@ type BaseBlockingViewProps = {
     /** Render custom subtitle */
     CustomSubtitle?: React.ReactElement;
 
+    /** Content rendered below the subtitle, e.g. a call-to-action button such as "Retry" */
+    footer?: React.ReactNode;
+
     /** Determines how the image should be resized to fit its container */
     contentFitImage?: ImageContentFit;
 
@@ -119,6 +122,7 @@ function BlockingView({
     animationWebStyle = {},
     accessibilityLabel = '',
     CustomSubtitle,
+    footer,
     contentFitImage,
     containerStyle: containerStyleProp,
     addBottomSafeAreaPadding,
@@ -184,6 +188,7 @@ function BlockingView({
                         )}
                     </SubtitleWrapper>
                 )}
+                {!!footer && <View style={[styles.alignItemsCenter, styles.mt4]}>{footer}</View>}
             </View>
         </ScrollView>
     );

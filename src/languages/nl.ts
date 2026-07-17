@@ -3591,6 +3591,7 @@ ${amount} voor ${merchant} - ${date}`,
         title: ({isBreakLine}: {isBreakLine: boolean}) => `Oeps... ${isBreakLine ? '\n' : ''}Er is iets misgegaan`,
         subtitle: 'Je verzoek kon niet worden voltooid. Probeer het later opnieuw.',
         wrongTypeSubtitle: 'Die zoekopdracht is ongeldig. Probeer je zoekcriteria aan te passen.',
+        retry: 'Opnieuw proberen',
     },
     statusPage: {
         status: 'Status',

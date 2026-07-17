@@ -1,4 +1,7 @@
+import Button from '@components/Button';
+
 import {useMemoizedLazyIllustrations} from '@hooks/useLazyAsset';
+import useLocalize from '@hooks/useLocalize';
 import useThemeStyles from '@hooks/useThemeStyles';
 
 import variables from '@styles/variables';
@@ -34,10 +37,24 @@ type FullPageErrorViewProps = {
     subtitleStyle?: StyleProp<TextStyle>;
 
     containerStyle?: StyleProp<ViewStyle>;
+
+    /** Callback invoked when the user presses the retry button. When omitted, no retry button is shown. */
+    onRetry?: () => void;
 };
 
-function FullPageErrorView({testID, children = null, shouldShow = false, title = '', subtitle = '', shouldForceFullScreen = false, subtitleStyle, containerStyle}: FullPageErrorViewProps) {
+function FullPageErrorView({
+    testID,
+    children = null,
+    shouldShow = false,
+    title = '',
+    subtitle = '',
+    shouldForceFullScreen = false,
+    subtitleStyle,
+    containerStyle,
+    onRetry,
+}: FullPageErrorViewProps) {
     const styles = useThemeStyles();
+    const {translate} = useLocalize();
     const illustrations = useMemoizedLazyIllustrations(['BrokenMagnifyingGlass']);
 
     if (shouldShow) {
@@ -55,6 +72,15 @@ function FullPageErrorView({testID, children = null, shouldShow = false, title =
                         subtitle={subtitle}
                         subtitleStyle={subtitleStyle}
                         containerStyle={containerStyle}
+                        footer={
+                            onRetry ? (
+                                <Button
+                                    success
+                                    text={translate('errorPage.retry')}
+                                    onPress={onRetry}
+                                />
+                            ) : undefined
+                        }
                     />
                 </View>
             </ForceFullScreenView>

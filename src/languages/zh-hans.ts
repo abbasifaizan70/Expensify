@@ -3488,6 +3488,7 @@ ${amount}，商户：${merchant} - 日期：${date}`,
         title: ({isBreakLine}: {isBreakLine: boolean}) => `哎呀… ${isBreakLine ? '\n' : ''}发生了一些错误`,
         subtitle: '无法完成您的请求。请稍后再试。',
         wrongTypeSubtitle: '该搜索无效。请尝试调整搜索条件。',
+        retry: '重试',
     },
     statusPage: {
         status: '状态',

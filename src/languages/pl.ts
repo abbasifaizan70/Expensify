@@ -3576,6 +3576,7 @@ ${amount} dla ${merchant} - ${date}`,
         title: ({isBreakLine}: {isBreakLine: boolean}) => `Ups... ${isBreakLine ? '\n' : ''}Coś poszło nie tak`,
         subtitle: 'Nie można było ukończyć Twojego żądania. Spróbuj ponownie później.',
         wrongTypeSubtitle: 'To wyszukiwanie jest nieprawidłowe. Spróbuj dostosować kryteria wyszukiwania.',
+        retry: 'Spróbuj ponownie',
     },
     statusPage: {
         status: 'Status',
