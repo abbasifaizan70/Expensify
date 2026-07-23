@@ -165,6 +165,7 @@ function AddAgentPage({route}: AddAgentPageProps) {
                             label={translate('addAgentPage.instructions')}
                             accessibilityLabel={translate('addAgentPage.instructions')}
                             role={CONST.ROLE.PRESENTATION}
+                            type="markdown"
                             defaultValue={defaultPrompt}
                             multiline
                             containerStyles={[styles.flex1]}

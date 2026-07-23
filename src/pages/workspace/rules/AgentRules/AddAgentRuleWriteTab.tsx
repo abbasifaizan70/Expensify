@@ -89,6 +89,7 @@ function AddAgentRuleWriteTab({onSave}: AddAgentRuleWriteTabProps) {
                         label={describeRuleLabel}
                         accessibilityLabel={describeRuleLabel}
                         role={CONST.ROLE.PRESENTATION}
+                        type="markdown"
                         onKeyPress={submitFormOnModEnter}
                         multiline
                         shouldSaveDraft
