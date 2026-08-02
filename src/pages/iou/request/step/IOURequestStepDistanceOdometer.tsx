@@ -105,8 +105,6 @@ function IOURequestStepDistanceOdometer({
     const endReadingInputRef = useRef<BaseTextInputRef | null>(null);
     const lastFocusedInputRef = useRef<BaseTextInputRef | null>(null);
 
-    const [isDiscardModalVisible, setIsDiscardModalVisible] = useState(false);
-
     const didSaveEditingConfirmationRef = useRef(false);
     const shouldBypassDiscardConfirmationRef = useRef(false);
     const backupHandledManually = useRef(false);
@@ -537,10 +535,8 @@ function IOURequestStepDistanceOdometer({
         setFormError('');
     };
 
-    // The inputs are `editable={!isDiscardModalVisible}`, so a bare focus() call here would still be a no-op:
-    // this fires before React commits the `isDiscardModalVisible: false` update, and on Android, before the
-    // native window even regains focus. focusComposerWithDelay waits on both (see its Android-specific gates)
-    // before focusing, so no extra effect/state is needed to defer past the commit.
+    // This fires before the native window regains focus on Android; focusComposerWithDelay waits on that
+    // (see its Android-specific gates) before focusing, so no extra effect/state is needed here.
     const restoreLastInputFocus = () => {
         const input = lastFocusedInputRef.current;
         if (input && isFocusableTextInputRef(input)) {
@@ -558,7 +554,6 @@ function IOURequestStepDistanceOdometer({
               }
             : undefined,
         onTabSwitchDiscard: handleTabSwitchDiscard,
-        onVisibilityChange: setIsDiscardModalVisible,
     });
 
     const handleSaveForLater = useCallback(async () => {
@@ -617,7 +612,6 @@ function IOURequestStepDistanceOdometer({
                                 onChangeText={handleStartReadingChange}
                                 keyboardType={CONST.KEYBOARD_TYPE.DECIMAL_PAD}
                                 inputMode={CONST.INPUT_MODE.DECIMAL}
-                                editable={!isDiscardModalVisible}
                                 onFocus={() => {
                                     lastFocusedInputRef.current = startReadingInputRef.current;
                                 }}
@@ -663,7 +657,6 @@ function IOURequestStepDistanceOdometer({
                                 onChangeText={handleEndReadingChange}
                                 keyboardType={CONST.KEYBOARD_TYPE.DECIMAL_PAD}
                                 inputMode={CONST.INPUT_MODE.DECIMAL}
-                                editable={!isDiscardModalVisible}
                                 onFocus={() => {
                                     lastFocusedInputRef.current = endReadingInputRef.current;
                                 }}

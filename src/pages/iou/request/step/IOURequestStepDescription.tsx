@@ -92,7 +92,6 @@ function IOURequestStepDescription({
 
     const [currentDescription, setCurrentDescription] = useState(currentDescriptionInMarkdown);
     const [isSaved, setIsSaved] = useState(false);
-    const [isDiscardModalVisible, setIsDiscardModalVisible] = useState(false);
     useRestartOnReceiptFailure(transaction, reportID, iouType, action);
     const currentUserPersonalDetails = useCurrentUserPersonalDetails();
     const currentUserAccountIDParam = currentUserPersonalDetails.accountID;
@@ -184,7 +183,6 @@ function IOURequestStepDescription({
             }
             return currentDescription !== currentDescriptionInMarkdown;
         },
-        onVisibilityChange: setIsDiscardModalVisible,
     });
 
     return (
@@ -216,7 +214,6 @@ function IOURequestStepDescription({
                         label={translate('moneyRequestConfirmationList.whatsItFor')}
                         accessibilityLabel={translate('moneyRequestConfirmationList.whatsItFor')}
                         role={CONST.ROLE.PRESENTATION}
-                        editable={!isDiscardModalVisible}
                         autoGrowHeight
                         maxAutoGrowHeight={variables.textInputAutoGrowMaxHeight}
                         shouldSubmitForm
