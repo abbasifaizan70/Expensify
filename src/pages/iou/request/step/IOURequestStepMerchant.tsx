@@ -77,7 +77,6 @@ function IOURequestStepMerchant({
     const initialMerchant = isEmptyMerchant ? '' : merchant;
     const [currentMerchant, setCurrentMerchant] = useState(initialMerchant);
     const [isSaved, setIsSaved] = useState(false);
-    const [isDiscardModalVisible, setIsDiscardModalVisible] = useState(false);
     const currentUserPersonalDetails = useCurrentUserPersonalDetails();
     const delegateAccountID = useDelegateAccountID();
     const currentUserAccountIDParam = currentUserPersonalDetails.accountID;
@@ -177,7 +176,6 @@ function IOURequestStepMerchant({
             }
             return currentMerchant !== initialMerchant;
         },
-        onVisibilityChange: setIsDiscardModalVisible,
     });
 
     return (
@@ -209,7 +207,6 @@ function IOURequestStepMerchant({
                         label={translate('common.merchant')}
                         accessibilityLabel={translate('common.merchant')}
                         role={CONST.ROLE.PRESENTATION}
-                        editable={!isDiscardModalVisible}
                         ref={inputCallbackRef}
                     />
                 </View>

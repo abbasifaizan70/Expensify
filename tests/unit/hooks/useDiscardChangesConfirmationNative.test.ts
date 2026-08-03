@@ -44,6 +44,15 @@ jest.mock('@libs/Log', () => ({
     default: {warn: jest.fn()},
 }));
 
+// The hook releases the keyboard (a real blur) and waits for it before presenting the modal (#97127)
+const mockKeyboardDismiss = jest.fn();
+jest.mock('@src/utils/keyboard', () => ({
+    __esModule: true,
+    default: {
+        dismiss: (...args: unknown[]) => mockKeyboardDismiss(...args) as Promise<void>,
+    },
+}));
+
 const mockNavigationDispatch = jest.fn();
 const mockNavigationGoBack = jest.fn();
 jest.mock('@libs/Navigation/navigationRef', () => ({
@@ -67,12 +76,23 @@ describe('useDiscardChangesConfirmation (native)', () => {
 
     const renderDiscardHook = (getHasUnsavedChanges: () => boolean) => renderHook(() => useDiscardChangesConfirmation({getHasUnsavedChanges}));
 
-    const pressHardwareBack = (): boolean | null | undefined => {
+    // The modal is presented only after the keyboard-dismissal promise settles, so flush microtasks after invoking
+    const pressHardwareBack = async (): Promise<boolean | null | undefined> => {
         let consumed: boolean | null | undefined;
-        act(() => {
+        await act(async () => {
             consumed = hardwareBackCallback?.();
+            await Promise.resolve();
+            await Promise.resolve();
         });
         return consumed;
+    };
+
+    const invokeBeforeRemove = async (type: string) => {
+        await act(async () => {
+            mockPreventRemoveCallback?.({data: {action: {type}}});
+            await Promise.resolve();
+            await Promise.resolve();
+        });
     };
 
     const resolveModalWith = async (action: string) => {
@@ -95,6 +115,7 @@ describe('useDiscardChangesConfirmation (native)', () => {
             hardwareBackCallback = handler;
             return {remove: removeSubscription};
         });
+        mockKeyboardDismiss.mockImplementation(() => Promise.resolve());
         mockShowConfirmModal.mockImplementation(
             () =>
                 new Promise((resolve) => {
@@ -107,55 +128,121 @@ describe('useDiscardChangesConfirmation (native)', () => {
         backHandlerSpy.mockRestore();
     });
 
-    describe('hardware back (tab-switch case: no removal, usePreventRemove blind)', () => {
-        it('consumes the back press and shows the modal when the form is dirty', () => {
+    describe('keyboard release before presenting the modal (#97127)', () => {
+        it('does not present the modal until the keyboard dismissal has settled', async () => {
+            let resolveKeyboardDismiss: (() => void) | undefined;
+            mockKeyboardDismiss.mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        resolveKeyboardDismiss = resolve;
+                    }),
+            );
             renderDiscardHook(() => true);
 
-            expect(pressHardwareBack()).toBe(true);
+            expect(await pressHardwareBack()).toBe(true);
+
+            // The keyboard is still animating away - the modal must not be up yet
+            expect(mockKeyboardDismiss).toHaveBeenCalledTimes(1);
+            expect(mockShowConfirmModal).not.toHaveBeenCalled();
+
+            await act(async () => {
+                resolveKeyboardDismiss?.();
+                await Promise.resolve();
+            });
+
+            expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
+        });
+
+        it('releases the keyboard on the blocked-action (header back) path too', async () => {
+            renderDiscardHook(() => true);
+
+            await invokeBeforeRemove('POP');
+
+            expect(mockKeyboardDismiss).toHaveBeenCalledTimes(1);
+            expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
+        });
+
+        it('swallows repeat back presses while the dismissal is still settling', async () => {
+            let resolveKeyboardDismiss: (() => void) | undefined;
+            mockKeyboardDismiss.mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        resolveKeyboardDismiss = resolve;
+                    }),
+            );
+            renderDiscardHook(() => true);
+
+            expect(await pressHardwareBack()).toBe(true);
+            expect(await pressHardwareBack()).toBe(true);
+
+            await act(async () => {
+                resolveKeyboardDismiss?.();
+                await Promise.resolve();
+            });
+
+            expect(mockKeyboardDismiss).toHaveBeenCalledTimes(1);
+            expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not touch the keyboard when the form is clean', async () => {
+            renderDiscardHook(() => false);
+
+            expect(await pressHardwareBack()).toBe(false);
+
+            expect(mockKeyboardDismiss).not.toHaveBeenCalled();
+            expect(mockShowConfirmModal).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('hardware back (tab-switch case: no removal, usePreventRemove blind)', () => {
+        it('consumes the back press and shows the modal when the form is dirty', async () => {
+            renderDiscardHook(() => true);
+
+            expect(await pressHardwareBack()).toBe(true);
             expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
             expect(mockNavigationGoBack).not.toHaveBeenCalled();
         });
 
-        it('lets the back press through when the form is clean', () => {
+        it('lets the back press through when the form is clean', async () => {
             renderDiscardHook(() => false);
 
-            expect(pressHardwareBack()).toBe(false);
+            expect(await pressHardwareBack()).toBe(false);
             expect(mockShowConfirmModal).not.toHaveBeenCalled();
         });
 
-        it('lets the back press through after suppressDiscardPrompt, and prompts again once the save ends', () => {
+        it('lets the back press through after suppressDiscardPrompt, and prompts again once the save ends', async () => {
             const {result} = renderDiscardHook(() => true);
 
             act(() => result.current.suppressDiscardPrompt());
-            expect(pressHardwareBack()).toBe(false);
+            expect(await pressHardwareBack()).toBe(false);
             expect(mockShowConfirmModal).not.toHaveBeenCalled();
 
             act(() => result.current.suppressDiscardPrompt(false));
-            expect(pressHardwareBack()).toBe(true);
+            expect(await pressHardwareBack()).toBe(true);
             expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
         });
 
-        it('lets the back press through when the screen is not focused, even with a dirty form', () => {
+        it('lets the back press through when the screen is not focused, even with a dirty form', async () => {
             mockIsFocused = false;
             renderDiscardHook(() => true);
 
-            expect(pressHardwareBack()).toBe(false);
+            expect(await pressHardwareBack()).toBe(false);
             expect(mockShowConfirmModal).not.toHaveBeenCalled();
         });
 
-        it('swallows back presses while the modal is open without stacking a second modal', () => {
+        it('swallows back presses while the modal is open without stacking a second modal', async () => {
             renderDiscardHook(() => true);
 
-            pressHardwareBack();
+            await pressHardwareBack();
 
-            expect(pressHardwareBack()).toBe(true);
+            expect(await pressHardwareBack()).toBe(true);
             expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
         });
 
         it('replays the back with goBack on confirm and keeps prevention armed', async () => {
             renderDiscardHook(() => true);
 
-            pressHardwareBack();
+            await pressHardwareBack();
             await resolveModalWith('CONFIRM');
 
             expect(mockNavigationGoBack).toHaveBeenCalledTimes(1);
@@ -166,7 +253,7 @@ describe('useDiscardChangesConfirmation (native)', () => {
         it('re-dispatches a beforeRemove fired during the goBack replay instead of re-prompting', async () => {
             renderDiscardHook(() => true);
 
-            pressHardwareBack();
+            await pressHardwareBack();
 
             // On the initial tab the replayed goBack pops the screen, which fires beforeRemove synchronously
             mockNavigationGoBack.mockImplementationOnce(() => {
@@ -183,14 +270,14 @@ describe('useDiscardChangesConfirmation (native)', () => {
             const onCancel = jest.fn();
             renderHook(() => useDiscardChangesConfirmation({getHasUnsavedChanges: () => true, onCancel}));
 
-            pressHardwareBack();
+            await pressHardwareBack();
             await resolveModalWith('CLOSE');
 
             expect(onCancel).toHaveBeenCalledTimes(1);
             expect(mockNavigationGoBack).not.toHaveBeenCalled();
             expect(mockNavigationDispatch).not.toHaveBeenCalled();
 
-            expect(pressHardwareBack()).toBe(true);
+            expect(await pressHardwareBack()).toBe(true);
             expect(mockShowConfirmModal).toHaveBeenCalledTimes(2);
         });
 
@@ -204,16 +291,10 @@ describe('useDiscardChangesConfirmation (native)', () => {
     });
 
     describe('usePreventRemove (removal case: header back, in-app pop)', () => {
-        const invokeBeforeRemove = (type: string) => {
-            act(() => {
-                mockPreventRemoveCallback?.({data: {action: {type}}});
-            });
-        };
-
         it('shows the modal and dispatches the blocked action on confirm', async () => {
             renderDiscardHook(() => true);
 
-            invokeBeforeRemove('POP');
+            await invokeBeforeRemove('POP');
             expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
 
             await resolveModalWith('CONFIRM');
@@ -222,20 +303,20 @@ describe('useDiscardChangesConfirmation (native)', () => {
             expect(mockNavigationGoBack).not.toHaveBeenCalled();
         });
 
-        it('allows and replays the action immediately when the form is clean', () => {
+        it('allows and replays the action immediately when the form is clean', async () => {
             renderDiscardHook(() => false);
 
-            invokeBeforeRemove('POP');
+            await invokeBeforeRemove('POP');
 
             expect(mockShowConfirmModal).not.toHaveBeenCalled();
             expect(mockNavigationDispatch).toHaveBeenCalledWith({type: 'POP'});
         });
 
-        it('ignores beforeRemove while the modal is already open', () => {
+        it('ignores beforeRemove while the modal is already open', async () => {
             renderDiscardHook(() => true);
 
-            pressHardwareBack();
-            invokeBeforeRemove('POP');
+            await pressHardwareBack();
+            await invokeBeforeRemove('POP');
 
             expect(mockShowConfirmModal).toHaveBeenCalledTimes(1);
         });
@@ -243,10 +324,10 @@ describe('useDiscardChangesConfirmation (native)', () => {
         it('clears the blocked action on cancel so a later hardware-back confirm uses goBack', async () => {
             renderDiscardHook(() => true);
 
-            invokeBeforeRemove('POP');
+            await invokeBeforeRemove('POP');
             await resolveModalWith('CLOSE');
 
-            pressHardwareBack();
+            await pressHardwareBack();
             await resolveModalWith('CONFIRM');
 
             expect(mockNavigationDispatch).not.toHaveBeenCalled();

@@ -6,6 +6,9 @@ import useLocalize from '@hooks/useLocalize';
 import navigationRef from '@libs/Navigation/navigationRef';
 import {useRegisterTabSwitchGuard} from '@libs/Navigation/TabSwitchGuardContext';
 
+import CONST from '@src/CONST';
+import KeyboardUtils from '@src/utils/keyboard';
+
 import type {NavigationAction} from '@react-navigation/native';
 
 import {useFocusEffect, useIsFocused, usePreventRemove, useRoute} from '@react-navigation/native';
@@ -46,26 +49,46 @@ function useDiscardChangesConfirmation({
         blockedNavigationAction.current = blockedAction;
         isDiscardModalOpen.current = true;
         onVisibilityChange?.(true);
-        showConfirmModal(getDiscardChangesModalConfig(translate)).then((result) => {
-            isDiscardModalOpen.current = false;
-            onVisibilityChange?.(false);
-            if (result.action !== ModalActions.CONFIRM) {
-                blockedNavigationAction.current = undefined;
-                onCancel?.();
-                return;
-            }
-            const confirmNavigation = () => {
-                isReplayingBlockedNavigation.current = true;
-                if (blockedNavigationAction.current) {
-                    navigationRef.current?.dispatch(blockedNavigationAction.current);
+        // Release the keyboard through RN's focus bookkeeping (a real blur) and wait until it is gone
+        // before presenting the modal. This keeps the modal from opening behind the iOS keyboard - the
+        // reason screens used to flip `editable` off while the modal was visible (PR #82097) - without
+        // resigning the first responder behind RN's back: disabling a focused input strands the keyboard
+        // session on the outgoing screen, so after a confirmed discard iOS consumes the next tap on the
+        // screen underneath to dismiss that stale keyboard instead of pressing the tapped row (#97127).
+        // Re-entrancy while the dismissal settles is safe: `isDiscardModalOpen` is already `true`, so
+        // both the `usePreventRemove` callback and the hardware-back handler swallow repeat presses.
+        KeyboardUtils.dismiss().then(() => {
+            showConfirmModal({
+                ...getDiscardChangesModalConfig(translate),
+                // Opt this modal out of focus restoration. On hide, BaseModal calls
+                // `ComposerFocusManager.refocusAfterModalFullyClosed`, which resolves asynchronously and therefore
+                // lands AFTER a confirmed discard has already navigated away. `restoreFocusState` then falls through
+                // to `tryRestoreTopmostFocus` and focuses the composer on the screen underneath, re-opening the
+                // keyboard we just dismissed: the composer jumps up and the next tap is spent blurring it instead of
+                // pressing the row that was tapped (#97127). Cancelling needs no restoration either, because
+                // consumers refocus their own input from `onCancel`.
+                restoreFocusType: CONST.MODAL.RESTORE_FOCUS_TYPE.DELETE,
+            }).then((result) => {
+                isDiscardModalOpen.current = false;
+                onVisibilityChange?.(false);
+                if (result.action !== ModalActions.CONFIRM) {
                     blockedNavigationAction.current = undefined;
-                } else {
-                    navigationRef.current?.goBack();
+                    onCancel?.();
+                    return;
                 }
-                isReplayingBlockedNavigation.current = false;
-            };
-            runDiscardConfirmation(onConfirm, confirmNavigation, () => {
-                blockedNavigationAction.current = undefined;
+                const confirmNavigation = () => {
+                    isReplayingBlockedNavigation.current = true;
+                    if (blockedNavigationAction.current) {
+                        navigationRef.current?.dispatch(blockedNavigationAction.current);
+                        blockedNavigationAction.current = undefined;
+                    } else {
+                        navigationRef.current?.goBack();
+                    }
+                    isReplayingBlockedNavigation.current = false;
+                };
+                runDiscardConfirmation(onConfirm, confirmNavigation, () => {
+                    blockedNavigationAction.current = undefined;
+                });
             });
         });
     };
