@@ -1,9 +1,12 @@
+import type {ForwardedFSClassProps} from '@libs/Fullstory/types';
+
+import type CONST from '@src/CONST';
+
 import type {FocusTrapProps} from 'focus-trap-react';
 import type {ForwardedRef} from 'react';
 import type {View, ViewStyle} from 'react-native';
 import type {ValueOf} from 'type-fest';
-import type {ForwardedFSClassProps} from '@libs/Fullstory/types';
-import type CONST from '@src/CONST';
+
 import type ReanimatedModalProps from './ReanimatedModal/types';
 import type {SwipeDirection} from './ReanimatedModal/types';
 
@@ -16,10 +19,6 @@ type PopoverAnchorPosition = {
     left?: number;
 };
 
-type WindowState = {
-    shouldGoBack: boolean;
-};
-
 type BaseModalProps = Partial<ReanimatedModalProps> &
     ForwardedFSClassProps & {
         /** Decides whether the modal should cover fullscreen. FullScreen modal has backdrop */
@@ -27,6 +26,12 @@ type BaseModalProps = Partial<ReanimatedModalProps> &
 
         /** Should we announce the Modal visibility changes? */
         shouldSetModalVisibility?: boolean;
+
+        /**
+         * Whether this modal should suppress persistent surfaces that must not overlap covering modals.
+         * POPOVER and BOTTOM_DOCKED modals default to false; other modal types default to true.
+         */
+        shouldTreatModalAsCovering?: boolean;
 
         /** Callback method fired when the user requests to close the modal */
         onClose?: () => void;
@@ -126,6 +131,14 @@ type BaseModalProps = Partial<ReanimatedModalProps> &
         shouldDisplayBelowModals?: boolean;
 
         /**
+         * Whether a RIGHT_DOCKED modal should keep its backdrop when it opens inside a narrow-pane RIGHT_DOCKED flow on larger screens.
+         * Set this to true for nested flows, such as inline date editing launching the Month/Year picker RHP, where the underlying pane should stay dimmed.
+         * Leave it false for the default same-width RHP case, where keeping the backdrop would create a double backdrop.
+         * See https://github.com/Expensify/App/issues/88645 for more details.
+         */
+        shouldKeepRightDockedBackdropInNarrowPane?: boolean;
+
+        /**
          * Whether the modal should wrap the children in a scroll view if it is a bottom docked modal in landscape mode.
          * Defaults to true.
          */
@@ -133,4 +146,4 @@ type BaseModalProps = Partial<ReanimatedModalProps> &
     };
 
 export default BaseModalProps;
-export type {PopoverAnchorPosition, FocusTrapOptions, WindowState};
+export type {PopoverAnchorPosition, FocusTrapOptions};

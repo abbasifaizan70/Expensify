@@ -1,9 +1,12 @@
-import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
 import {getIOUActionForTransactionID} from '@libs/ReportActionsUtils';
-import {getTagArrayFromName} from '@libs/TransactionUtils';
+import {isIOUReport} from '@libs/ReportUtils';
+import {getTagArrayFromName, isDistanceRequest, isPerDiemRequest} from '@libs/TransactionUtils';
+
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {Policy, Report, ReportActions, SearchResults, Transaction} from '@src/types/onyx';
+
+import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
 
 /**
  * Returns the longest common dependent tag prefix for the provided transactions.
@@ -59,6 +62,27 @@ function getTransactionEditContext(
     const reportAction = getIOUActionForTransactionID(Object.values(reportActions), transactionID);
     const transactionPolicy = policies?.[`${ONYXKEYS.COLLECTION.POLICY}${report?.policyID}`];
     return {transaction, report, reportAction, transactionPolicy};
+}
+
+/**
+ * Distance and per-diem transactions have a system-derived merchant that cannot be user-edited
+ * regardless of whether the transaction is reported or unreported.
+ */
+function hasCustomUnitMerchantInSelection(selectedTransactionContexts: Array<{transaction: Transaction}>): boolean {
+    return selectedTransactionContexts.some(({transaction}) => isDistanceRequest(transaction) || isPerDiemRequest(transaction));
+}
+
+/**
+ * Category/Tag/Tax only apply to expense/invoice reports and unreported (track) expenses.
+ * Returns true only when every selected transaction is eligible.
+ */
+function areAllTransactionsExpenseCompatible(selectedTransactionContexts: Array<{transaction: Transaction; report: OnyxEntry<Report>}>): boolean {
+    return selectedTransactionContexts.every(({transaction, report}) => {
+        if (!transaction.reportID || transaction.reportID === CONST.REPORT.UNREPORTED_REPORT_ID) {
+            return true;
+        }
+        return !isIOUReport(report);
+    });
 }
 
 /**
@@ -134,4 +158,13 @@ function withSnapshotReports(onyxReports: OnyxCollection<Report> | undefined, sn
     return merged;
 }
 
-export {getCommonDependentTag, getTransactionEditContext, isBulkEditTaxTrackingEnabled, withSnapshotTransactions, withSnapshotReportActions, withSnapshotReports};
+export {
+    getCommonDependentTag,
+    getTransactionEditContext,
+    hasCustomUnitMerchantInSelection,
+    areAllTransactionsExpenseCompatible,
+    isBulkEditTaxTrackingEnabled,
+    withSnapshotTransactions,
+    withSnapshotReportActions,
+    withSnapshotReports,
+};

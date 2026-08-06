@@ -1,21 +1,31 @@
-import React, {createContext, useCallback, useContext, useMemo, useRef, useState} from 'react';
-import type {RefObject} from 'react';
-import type {View} from 'react-native';
-import type {OnyxEntry} from 'react-native-onyx';
 import AccountingConnectionConfirmationModal from '@components/AccountingConnectionConfirmationModal';
-import useHasPoliciesConnectedToSageIntacct from '@hooks/useHasPoliciesConnectedToSageIntacct';
+
+import useCardFeeds from '@hooks/useCardFeeds';
+import useCardsLists from '@hooks/useCardsLists';
+import useHasReusablePoliciesConnectedTo from '@hooks/useHasReusablePoliciesConnectedTo';
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
-import useReusablePoliciesConnectedToQBD from '@hooks/useReusablePoliciesConnectedToQBD';
+
 import {removePolicyConnection} from '@libs/actions/connections';
 import Navigation from '@libs/Navigation/Navigation';
-import {isControlPolicy} from '@libs/PolicyUtils';
+import {isControlPolicy, tryNavigateToSubmitWorkspaceUpgrade} from '@libs/PolicyUtils';
+
 import {getAccountingIntegrationData} from '@pages/workspace/accounting/utils';
+
+import CONST from '@src/CONST';
 import ROUTES from '@src/ROUTES';
 import type Policy from '@src/types/onyx/Policy';
 import type ChildrenProps from '@src/types/utils/ChildrenProps';
-import {defaultAccountingActionsContextValue, defaultAccountingStateContextValue, popoverAnchorRefsInitialValue} from './default';
+
+import type {RefObject} from 'react';
+import type {View} from 'react-native';
+import type {OnyxEntry} from 'react-native-onyx';
+
+import React, {createContext, useCallback, useContext, useMemo, useRef, useState} from 'react';
+
 import type {AccountingActionsContextType, AccountingStateContextType, ActiveIntegration, ActiveIntegrationState} from './types';
+
+import {defaultAccountingActionsContextValue, defaultAccountingStateContextValue, popoverAnchorRefsInitialValue} from './default';
 
 const AccountingStateContext = createContext<AccountingStateContextType>(defaultAccountingStateContextValue);
 const AccountingActionsContext = createContext<AccountingActionsContextType>(defaultAccountingActionsContextValue);
@@ -29,9 +39,13 @@ function AccountingContextProvider({children, policy}: AccountingContextProvider
     const [activeIntegration, setActiveIntegration] = useState<ActiveIntegrationState>();
     const {translate} = useLocalize();
     const policyID = policy?.id;
-    const accountingIcons = useMemoizedLazyExpensifyIcons(['IntacctSquare', 'QBOSquare', 'XeroSquare', 'NetSuiteSquare', 'QBDSquare']);
-    const hasPoliciesConnectedToSageIntacct = useHasPoliciesConnectedToSageIntacct();
-    const {hasReusablePoliciesConnectedToQBD} = useReusablePoliciesConnectedToQBD(policyID);
+    const accountingIcons = useMemoizedLazyExpensifyIcons(['IntacctSquare', 'QBOSquare', 'XeroSquare', 'NetSuiteSquare', 'QBDSquare', 'CertiniaSquare', 'RilletSquare']);
+    const hasReusablePoliciesConnectedToSageIntacct = useHasReusablePoliciesConnectedTo(CONST.POLICY.CONNECTIONS.NAME.SAGE_INTACCT, policyID);
+    const hasReusablePoliciesConnectedToQBD = useHasReusablePoliciesConnectedTo(CONST.POLICY.CONNECTIONS.NAME.QBD, policyID);
+    const hasReusablePoliciesConnectedToCertinia = useHasReusablePoliciesConnectedTo(CONST.POLICY.CONNECTIONS.NAME.CERTINIA, policyID);
+    const hasReusablePoliciesConnectedToRillet = useHasReusablePoliciesConnectedTo(CONST.POLICY.CONNECTIONS.NAME.RILLET, policyID);
+    const [cardFeeds] = useCardFeeds(policyID);
+    const [cardLists] = useCardsLists();
 
     const startIntegrationFlow = useCallback(
         (newActiveIntegration: ActiveIntegration) => {
@@ -39,18 +53,31 @@ function AccountingContextProvider({children, policy}: AccountingContextProvider
                 return;
             }
 
+            if (tryNavigateToSubmitWorkspaceUpgrade(policy, true, CONST.UPGRADE_FEATURE_INTRO_MAPPING.accounting.alias)) {
+                return;
+            }
+
             const accountingIntegrationData = getAccountingIntegrationData(
                 newActiveIntegration.name,
                 policyID,
                 translate,
-                {sageIntacct: hasPoliciesConnectedToSageIntacct, qbd: hasReusablePoliciesConnectedToQBD},
+                {
+                    sageIntacct: hasReusablePoliciesConnectedToSageIntacct,
+                    qbd: hasReusablePoliciesConnectedToQBD,
+                    certinia: hasReusablePoliciesConnectedToCertinia,
+                    rillet: hasReusablePoliciesConnectedToRillet,
+                },
                 undefined,
                 undefined,
                 newActiveIntegration.integrationToDisconnect,
                 newActiveIntegration.shouldDisconnectIntegrationBeforeConnecting,
                 undefined,
                 accountingIcons,
+                cardFeeds,
+                cardLists,
+                newActiveIntegration.isIntuitEnterpriseSuite,
             );
+
             const workspaceUpgradeNavigationDetails = accountingIntegrationData?.workspaceUpgradeNavigationDetails;
             if (workspaceUpgradeNavigationDetails && !isControlPolicy(policy)) {
                 Navigation.navigate(
@@ -63,7 +90,18 @@ function AccountingContextProvider({children, policy}: AccountingContextProvider
                 key: Math.random(),
             });
         },
-        [policy, policyID, translate, hasPoliciesConnectedToSageIntacct, hasReusablePoliciesConnectedToQBD, accountingIcons],
+        [
+            policy,
+            policyID,
+            translate,
+            hasReusablePoliciesConnectedToSageIntacct,
+            hasReusablePoliciesConnectedToQBD,
+            hasReusablePoliciesConnectedToCertinia,
+            hasReusablePoliciesConnectedToRillet,
+            accountingIcons,
+            cardFeeds,
+            cardLists,
+        ],
     );
 
     const closeConfirmationModal = () => {
@@ -103,13 +141,21 @@ function AccountingContextProvider({children, policy}: AccountingContextProvider
             activeIntegration.name,
             policyID,
             translate,
-            {sageIntacct: hasPoliciesConnectedToSageIntacct, qbd: hasReusablePoliciesConnectedToQBD},
+            {
+                sageIntacct: hasReusablePoliciesConnectedToSageIntacct,
+                qbd: hasReusablePoliciesConnectedToQBD,
+                certinia: hasReusablePoliciesConnectedToCertinia,
+                rillet: hasReusablePoliciesConnectedToRillet,
+            },
             policy,
             activeIntegration.key,
             undefined,
             undefined,
             undefined,
             accountingIcons,
+            cardFeeds,
+            cardLists,
+            activeIntegration.isIntuitEnterpriseSuite,
         )?.setupConnectionFlow;
     };
 
@@ -129,7 +175,8 @@ function AccountingContextProvider({children, policy}: AccountingContextProvider
                             removePolicyConnection(policy, activeIntegration?.integrationToDisconnect);
                             closeConfirmationModal();
                         }}
-                        integrationToConnect={activeIntegration?.name}
+                        integrationToConnect={activeIntegration.name}
+                        integrationDisplayName={activeIntegration.isIntuitEnterpriseSuite ? translate('workspace.accounting.intuitEnterpriseSuite') : undefined}
                         onCancel={() => {
                             setActiveIntegration(undefined);
                         }}
@@ -149,4 +196,3 @@ function useAccountingActions(): AccountingActionsContextType {
 }
 
 export {AccountingContextProvider, useAccountingState, useAccountingActions};
-export type {AccountingActionsContextType, AccountingStateContextType, ActiveIntegration} from './types';

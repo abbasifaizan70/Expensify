@@ -1,14 +1,13 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import Onyx from 'react-native-onyx';
-import type {OnyxEntry, OnyxKey} from 'react-native-onyx';
+import {waitFor} from '@testing-library/react-native';
+
 import type {SearchQueryJSON} from '@components/Search/types';
+
 import {detachReceipt, replaceReceipt} from '@libs/actions/IOU/Receipt';
 import initOnyxDerivedValues from '@libs/actions/OnyxDerived';
 import {WRITE_COMMANDS} from '@libs/API/types';
-import {rand64} from '@libs/NumberUtils';
-// eslint-disable-next-line no-restricted-syntax
 import type * as PolicyUtils from '@libs/PolicyUtils';
+
 import CONST from '@src/CONST';
 import OnyxUpdateManager from '@src/libs/actions/OnyxUpdateManager';
 import * as API from '@src/libs/API';
@@ -16,13 +15,18 @@ import * as SearchQueryUtils from '@src/libs/SearchQueryUtils';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {Policy, SearchResults} from '@src/types/onyx';
 import type Transaction from '@src/types/onyx/Transaction';
+
+import type {OnyxEntry} from 'react-native-onyx';
+
+import Onyx from 'react-native-onyx';
+
 import createRandomPolicy from '../../utils/collections/policies';
 import createRandomPolicyTags from '../../utils/collections/policyTags';
 import {createRandomReport} from '../../utils/collections/reports';
 import createRandomTransaction from '../../utils/collections/transaction';
+import createMock from '../../utils/createMock';
 import getOnyxValue from '../../utils/getOnyxValue';
-import type {MockFetch} from '../../utils/TestHelper';
-import {getGlobalFetchMock} from '../../utils/TestHelper';
+import {getGlobalFetchMock, getRequiredOnyxUpdate, getRequiredOnyxUpdates, getRequiredWriteCall} from '../../utils/TestHelper';
 import waitForBatchedUpdates from '../../utils/waitForBatchedUpdates';
 
 jest.mock('@src/libs/Navigation/Navigation', () => ({
@@ -45,7 +49,6 @@ jest.mock('@src/libs/Navigation/Navigation', () => ({
 jest.mock('@react-navigation/native');
 
 jest.mock('@src/libs/actions/Report', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const originalModule = jest.requireActual('@src/libs/actions/Report');
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return {
@@ -68,8 +71,6 @@ const RORY_ACCOUNT_ID = 3;
 OnyxUpdateManager();
 
 describe('actions/IOU/Receipt', () => {
-    let mockFetch: MockFetch;
-
     beforeAll(() => {
         Onyx.init({
             keys: ONYXKEYS,
@@ -83,181 +84,429 @@ describe('actions/IOU/Receipt', () => {
 
     beforeEach(() => {
         global.fetch = getGlobalFetchMock();
-        mockFetch = fetch as MockFetch;
         return Onyx.clear().then(waitForBatchedUpdates);
     });
 
     afterEach(() => {
-        mockFetch?.mockClear();
+        jest.mocked(global.fetch).mockClear();
     });
 
     describe('replaceReceipt', () => {
-        it('should replace the receipt of the transaction', async () => {
-            const transactionID = rand64().toString();
-            const snapshotHash = 918273645;
+        const snapshotHash = 918273645;
+        const source = 'test';
+        const policyID = 'replaceReceiptPolicyID';
+
+        let transactionID: string;
+        const OLD_RECEIPT = {source: 'old.jpg', state: CONST.IOU.RECEIPT_STATE.OPEN, filename: 'old.jpg'};
+
+        const createFile = () => {
             const file = new File([new Blob(['test'])], 'test.jpg', {type: 'image/jpeg'});
             file.source = 'test';
-            const source = 'test';
-            const getCurrentSearchQueryJSONSpy = jest.spyOn(SearchQueryUtils, 'getCurrentSearchQueryJSON').mockReturnValue({hash: snapshotHash} as SearchQueryJSON);
+            return file;
+        };
 
-            const transaction = {
-                transactionID,
-                receipt: {
-                    source: 'test1',
-                },
-            };
-
-            // Given a transaction with a receipt
-            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, transaction);
-            await waitForBatchedUpdates();
-
-            // Given a snapshot of the transaction
+        const setupTransactionWithSnapshot = async (id: string, transactionData: Record<string, unknown> = {}) => {
+            const transaction = {...createRandomTransaction(Number(id)), ...transactionData};
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${id}`, transaction);
             await Onyx.set(`${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}`, {
                 // @ts-expect-error: Allow partial record in snapshot update
                 data: {
-                    [`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]: transaction,
+                    [`${ONYXKEYS.COLLECTION.TRANSACTION}${id}`]: transaction,
                 },
             });
             await waitForBatchedUpdates();
+            return transaction;
+        };
 
-            try {
-                // When the receipt is replaced
-                replaceReceipt({transactionID, file, source, transactionPolicy: undefined});
-                await waitForBatchedUpdates();
-
-                // Then the transaction should have the new receipt source
-                const updatedTransaction = await new Promise<OnyxEntry<Transaction>>((resolve) => {
-                    const connection = Onyx.connect({
-                        key: ONYXKEYS.COLLECTION.TRANSACTION,
-                        waitForCollectionCallback: true,
-                        callback: (transactions) => {
-                            Onyx.disconnect(connection);
-                            const newTransaction = transactions[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`];
-                            resolve(newTransaction);
-                        },
-                    });
+        const getUpdatedTransaction = async (id: string) => {
+            return new Promise<OnyxEntry<Transaction>>((resolve) => {
+                const connection = Onyx.connect({
+                    key: ONYXKEYS.COLLECTION.TRANSACTION,
+                    callback: (transactions) => {
+                        Onyx.disconnect(connection);
+                        resolve(transactions[`${ONYXKEYS.COLLECTION.TRANSACTION}${id}`]);
+                    },
                 });
-                expect(updatedTransaction?.receipt?.source).toBe(source);
-                expect(updatedTransaction?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.OPEN);
+            });
+        };
 
-                // Then the snapshot should have the new receipt source
-                const updatedSnapshot = (await getOnyxValue(`${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}` as OnyxKey)) as OnyxEntry<SearchResults>;
+        const getSearchSnapshot = async (hash: number): Promise<OnyxEntry<SearchResults>> => {
+            const snapshots = await getOnyxValue(ONYXKEYS.COLLECTION.SNAPSHOT);
+            return snapshots?.[`${ONYXKEYS.COLLECTION.SNAPSHOT}${hash}`];
+        };
 
-                expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.source).toBe(source);
-                expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.OPEN);
-            } finally {
-                getCurrentSearchQueryJSONSpy.mockRestore();
-            }
+        let getCurrentSearchQueryJSONSpy: jest.SpyInstance;
+
+        const mockApiWrite = () => {
+            return jest.spyOn(API, 'write').mockImplementation(jest.fn());
+        };
+
+        beforeEach(() => {
+            // Transaction IDs are converted to numbers by the test fixture. Keep this value
+            // within JavaScript's safe integer range so the transaction data and its Onyx key
+            // continue to refer to the same ID.
+            transactionID = Date.now().toString();
+            getCurrentSearchQueryJSONSpy = jest.spyOn(SearchQueryUtils, 'getCurrentSearchQueryJSON').mockReturnValue(createMock<SearchQueryJSON>({hash: snapshotHash}));
+        });
+
+        afterEach(() => {
+            getCurrentSearchQueryJSONSpy.mockRestore();
+        });
+
+        it('should do nothing when file is undefined', async () => {
+            // Given a transaction with an existing receipt
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: {source: 'original.jpg'}});
+
+            // When replaceReceipt is called without a file
+            replaceReceipt({transaction, file: undefined, source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+            await waitForBatchedUpdates();
+
+            // Then the receipt source remains unchanged
+            const updatedTransaction = await getUpdatedTransaction(transactionID);
+            expect(updatedTransaction?.receipt?.source).toBe('original.jpg');
+        });
+
+        it('should replace the receipt of the transaction', async () => {
+            // Given a transaction with an existing receipt
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: {source: 'test1'}});
+
+            // When replaceReceipt is called with a new file
+            replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+            await waitForBatchedUpdates();
+
+            // Then both the transaction and its snapshot entry reflect the new receipt
+            const updatedTransaction = await getUpdatedTransaction(transactionID);
+            expect(updatedTransaction?.receipt?.source).toBe(source);
+            expect(updatedTransaction?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.OPEN);
+
+            const updatedSnapshot = await getSearchSnapshot(snapshotHash);
+            expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.source).toBe(source);
+            expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.OPEN);
         });
 
         it('should preserve receipt state when state is provided', async () => {
-            const transactionID = rand64().toString();
-            const snapshotHash = 918273647;
-            const file = new File([new Blob(['test'])], 'test.jpg', {type: 'image/jpeg'});
-            file.source = 'test';
-            const source = 'test';
-            const getCurrentSearchQueryJSONSpy = jest.spyOn(SearchQueryUtils, 'getCurrentSearchQueryJSON').mockReturnValue({hash: snapshotHash} as SearchQueryJSON);
+            // Given a transaction with a receipt in SCAN_READY state
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: {source: 'test1', state: CONST.IOU.RECEIPT_STATE.SCAN_READY}});
 
-            const transaction = {
-                transactionID,
-                receipt: {
-                    source: 'test1',
-                    state: CONST.IOU.RECEIPT_STATE.SCAN_READY,
-                },
-            };
-
-            // Given a transaction with a receipt in SCANREADY state
-            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, transaction);
-            await waitForBatchedUpdates();
-
-            // Given a snapshot of the transaction
-            await Onyx.set(`${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}`, {
-                // @ts-expect-error: Allow partial record in snapshot update
-                data: {
-                    [`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]: transaction,
-                },
+            // When replaceReceipt is called with the same state explicitly passed
+            replaceReceipt({
+                transaction,
+                file: createFile(),
+                source,
+                state: CONST.IOU.RECEIPT_STATE.SCAN_READY,
+                transactionPolicy: undefined,
+                transactionPolicyTagList: undefined,
+                transactionReport: undefined,
             });
             await waitForBatchedUpdates();
 
-            try {
-                // When the receipt is replaced with the state preserved (e.g. rotating receipt)
-                replaceReceipt({transactionID, file, source, state: CONST.IOU.RECEIPT_STATE.SCAN_READY, transactionPolicy: undefined});
-                await waitForBatchedUpdates();
+            // Then the new receipt retains the provided state instead of falling back to OPEN
+            const updatedTransaction = await getUpdatedTransaction(transactionID);
+            expect(updatedTransaction?.receipt?.source).toBe(source);
+            expect(updatedTransaction?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.SCAN_READY);
 
-                // Then the transaction should have the new receipt source but preserve the state
-                const updatedTransaction = await new Promise<OnyxEntry<Transaction>>((resolve) => {
-                    const connection = Onyx.connect({
-                        key: ONYXKEYS.COLLECTION.TRANSACTION,
-                        waitForCollectionCallback: true,
-                        callback: (transactions) => {
-                            Onyx.disconnect(connection);
-                            const newTransaction = transactions[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`];
-                            resolve(newTransaction);
-                        },
-                    });
-                });
-                expect(updatedTransaction?.receipt?.source).toBe(source);
-                expect(updatedTransaction?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.SCAN_READY);
-
-                // Then the snapshot should also preserve the state
-                const updatedSnapshot = (await getOnyxValue(`${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}` as OnyxKey)) as OnyxEntry<SearchResults>;
-
-                expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.source).toBe(source);
-                expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.SCAN_READY);
-            } finally {
-                getCurrentSearchQueryJSONSpy.mockRestore();
-            }
+            const updatedSnapshot = await getSearchSnapshot(snapshotHash);
+            expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.source).toBe(source);
+            expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.state).toBe(CONST.IOU.RECEIPT_STATE.SCAN_READY);
         });
 
         it('should add receipt if it does not exist', async () => {
-            const transactionID = rand64().toString();
-            const snapshotHash = 918273646;
-            const file = new File([new Blob(['test'])], 'test.jpg', {type: 'image/jpeg'});
-            file.source = 'test';
-            const source = 'test';
-            const getCurrentSearchQueryJSONSpy = jest.spyOn(SearchQueryUtils, 'getCurrentSearchQueryJSON').mockReturnValue({hash: snapshotHash} as SearchQueryJSON);
+            // Given a transaction with no receipt
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: null});
 
-            const transaction = {
-                transactionID,
-            };
-
-            // Given a transaction without a receipt
-            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, transaction);
+            // When replaceReceipt is called
+            replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
             await waitForBatchedUpdates();
 
-            // Given a snapshot of the transaction
-            await Onyx.set(`${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}`, {
-                // @ts-expect-error: Allow partial record in snapshot update
-                data: {
-                    [`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]: transaction,
-                },
+            // Then the receipt is created with the new source on both the transaction and snapshot
+            const updatedTransaction = await getUpdatedTransaction(transactionID);
+            expect(updatedTransaction?.receipt?.source).toBe(source);
+
+            await waitFor(async () => {
+                const updatedSnapshot = await getSearchSnapshot(snapshotHash);
+                expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.source).toBe(source);
             });
-            await waitForBatchedUpdates();
+        });
+
+        it('should optimistically set pending field for receipt', async () => {
+            // Given a transaction with an existing receipt
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
 
             try {
-                // When the receipt is replaced
-                replaceReceipt({transactionID, file, source, transactionPolicy: undefined});
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
                 await waitForBatchedUpdates();
 
-                // Then the transaction should have the new receipt source
-                const updatedTransaction = await new Promise<OnyxEntry<Transaction>>((resolve) => {
-                    const connection = Onyx.connect({
-                        key: ONYXKEYS.COLLECTION.TRANSACTION,
-                        waitForCollectionCallback: true,
-                        callback: (transactions) => {
-                            Onyx.disconnect(connection);
-                            const newTransaction = transactions[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`];
-                            resolve(newTransaction);
-                        },
-                    });
-                });
-                expect(updatedTransaction?.receipt?.source).toBe(source);
-
-                // Then the snapshot should have the new receipt source
-                const updatedSnapshot = (await getOnyxValue(`${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}` as OnyxKey)) as OnyxEntry<SearchResults>;
-                expect(updatedSnapshot?.data?.[`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]?.receipt?.source).toBe(source);
+                // Then the optimisticData marks the receipt field as pending UPDATE
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const transactionOptimistic = getRequiredOnyxUpdate(onyxData, 'optimisticData', `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, Onyx.METHOD.MERGE, true);
+                expect(transactionOptimistic.value).toEqual(
+                    expect.objectContaining({
+                        receipt: expect.objectContaining({source, state: CONST.IOU.RECEIPT_STATE.OPEN}),
+                        pendingFields: {receipt: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE},
+                    }),
+                );
             } finally {
-                getCurrentSearchQueryJSONSpy.mockRestore();
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should call API.write with REPLACE_RECEIPT command and correct params', async () => {
+            // Given a transaction with an existing receipt
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
+
+            try {
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+                await waitForBatchedUpdates();
+
+                // Then API.write is invoked with the REPLACE_RECEIPT command and the correct transactionID
+                expect(writeSpy).toHaveBeenCalledWith(WRITE_COMMANDS.REPLACE_RECEIPT, expect.objectContaining({transactionID}), expect.anything());
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should compute violations when policy is paid group', async () => {
+            // Given a transaction and expense report linked to a paid group policy with tag definitions
+            const reportID = 'replaceReceiptReportID';
+            const policy = {
+                ...createRandomPolicy(1, CONST.POLICY.TYPE.TEAM),
+                id: policyID,
+            };
+            const policyTagList = createRandomPolicyTags('Department', 3);
+            const transaction = {
+                ...createRandomTransaction(1),
+                transactionID,
+                reportID,
+                receipt: OLD_RECEIPT,
+            };
+            const report = {
+                ...createRandomReport(1, undefined),
+                reportID,
+                policyID,
+                type: CONST.REPORT.TYPE.EXPENSE,
+            };
+
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, transaction);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${reportID}`, report);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, policy);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY_TAGS}${policyID}`, policyTagList);
+            await waitForBatchedUpdates();
+
+            // When replaceReceipt is called with the paid group policy
+            replaceReceipt({transaction, file: createFile(), source, transactionPolicy: policy, transactionPolicyTagList: undefined, transactionReport: undefined});
+            await waitForBatchedUpdates();
+
+            // Then transaction violations are computed and stored
+            const violations = await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}`);
+            expect(violations).toBeDefined();
+            expect(Array.isArray(violations)).toBe(true);
+        });
+
+        it('should rollback to the previous receipt in failure data', async () => {
+            // Given a transaction with OLD_RECEIPT
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
+
+            try {
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+                await waitForBatchedUpdates();
+
+                // Then the failureData restores the original receipt, clears pendingFields, and attaches errors
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const transactionFailure = getRequiredOnyxUpdate(onyxData, 'failureData', `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, Onyx.METHOD.MERGE, true);
+                expect(transactionFailure.value).toEqual(
+                    expect.objectContaining({
+                        receipt: OLD_RECEIPT,
+                        pendingFields: {receipt: null},
+                    }),
+                );
+                expect(transactionFailure.value.errors).toBeDefined();
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should rollback the receipt to null in failure data when there was no previous receipt', async () => {
+            // Given a transaction with no receipt
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: null});
+
+            try {
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+                await waitForBatchedUpdates();
+
+                // Then the failureData sets receipt to null since there was nothing to restore
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const transactionFailure = getRequiredOnyxUpdate(onyxData, 'failureData', `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, Onyx.METHOD.MERGE, true);
+                expect(transactionFailure.value).toEqual(
+                    expect.objectContaining({
+                        receipt: null,
+                        pendingFields: {receipt: null},
+                    }),
+                );
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should clear pending fields in success data', async () => {
+            // Given a transaction with an existing receipt
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
+
+            try {
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+                await waitForBatchedUpdates();
+
+                // Then the successData clears the pending field for the receipt
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const transactionSuccess = getRequiredOnyxUpdate(onyxData, 'successData', `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, Onyx.METHOD.MERGE, true);
+                expect(transactionSuccess.value).toEqual({
+                    pendingFields: {receipt: null},
+                });
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should not include snapshot updates when there is no current search query hash', async () => {
+            // Given there is no active search query hash
+            getCurrentSearchQueryJSONSpy.mockReturnValueOnce(null);
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
+
+            try {
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+                await waitForBatchedUpdates();
+
+                // Then no snapshot updates are included in either optimisticData or failureData
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                expect(getRequiredOnyxUpdates(onyxData, 'optimisticData')).not.toEqual(
+                    expect.arrayContaining([expect.objectContaining({key: expect.stringMatching(new RegExp(`^${ONYXKEYS.COLLECTION.SNAPSHOT}`))})]),
+                );
+                expect(getRequiredOnyxUpdates(onyxData, 'failureData')).not.toEqual(
+                    expect.arrayContaining([expect.objectContaining({key: expect.stringMatching(new RegExp(`^${ONYXKEYS.COLLECTION.SNAPSHOT}`))})]),
+                );
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should rollback the snapshot receipt in failure data when a search query hash exists', async () => {
+            // Given a transaction with OLD_RECEIPT and an active search snapshot
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
+
+            try {
+                // When replaceReceipt is called
+                replaceReceipt({transaction, file: createFile(), source, transactionPolicy: undefined, transactionPolicyTagList: undefined, transactionReport: undefined});
+                await waitForBatchedUpdates();
+
+                // Then the failureData restores the original receipt inside the snapshot entry
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const snapshotFailure = getRequiredOnyxUpdate(onyxData, 'failureData', `${ONYXKEYS.COLLECTION.SNAPSHOT}${snapshotHash}`, Onyx.METHOD.MERGE, true);
+                expect(snapshotFailure.value).toEqual(
+                    expect.objectContaining({
+                        data: expect.objectContaining({
+                            [`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`]: expect.objectContaining({receipt: OLD_RECEIPT}),
+                        }),
+                    }),
+                );
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should forward isSameReceipt and receiptState to API parameters', async () => {
+            // Given a transaction with an existing receipt
+            const writeSpy = mockApiWrite();
+            const transaction = await setupTransactionWithSnapshot(transactionID, {receipt: OLD_RECEIPT});
+
+            try {
+                // When replaceReceipt is called with isSameReceipt=true and a specific receipt state
+                replaceReceipt({
+                    transaction,
+                    file: createFile(),
+                    source,
+                    state: CONST.IOU.RECEIPT_STATE.SCAN_READY,
+                    transactionPolicy: undefined,
+                    transactionPolicyTagList: undefined,
+                    transactionReport: undefined,
+                    isSameReceipt: true,
+                });
+                await waitForBatchedUpdates();
+
+                // Then API.write receives those parameters verbatim
+                expect(writeSpy).toHaveBeenCalledWith(
+                    WRITE_COMMANDS.REPLACE_RECEIPT,
+                    expect.objectContaining({
+                        transactionID,
+                        receiptState: CONST.IOU.RECEIPT_STATE.SCAN_READY,
+                        isSameReceipt: true,
+                        receipt: expect.any(Object),
+                    }),
+                    expect.anything(),
+                );
+            } finally {
+                writeSpy.mockRestore();
+            }
+        });
+
+        it('should rollback transaction violations in failure data when policy is paid group', async () => {
+            // Given a transaction with existing violations linked to a paid group policy
+            const reportID = 'replaceReceiptViolationsRollbackReportID';
+            const policy = {
+                ...createRandomPolicy(1, CONST.POLICY.TYPE.TEAM),
+                id: policyID,
+            };
+            const existingViolations = [{name: CONST.VIOLATIONS.MISSING_CATEGORY, type: CONST.VIOLATION_TYPES.VIOLATION}];
+            const transaction = {
+                ...createRandomTransaction(1),
+                transactionID,
+                reportID,
+                receipt: OLD_RECEIPT,
+            };
+            const report = {
+                ...createRandomReport(1, undefined),
+                reportID,
+                policyID,
+                type: CONST.REPORT.TYPE.EXPENSE,
+            };
+
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, transaction);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${reportID}`, report);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, policy);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}`, existingViolations);
+            await waitForBatchedUpdates();
+
+            // When replaceReceipt is called with the paid group policy
+            const writeSpy = mockApiWrite();
+            try {
+                replaceReceipt({
+                    transaction,
+                    file: createFile(),
+                    source,
+                    transactionPolicy: policy,
+                    transactionPolicyTagList: undefined,
+                    transactionReport: undefined,
+                    transactionViolations: existingViolations,
+                });
+                await waitForBatchedUpdates();
+
+                // Then the failureData restores the original violations
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const violationsFailure = getRequiredOnyxUpdate(onyxData, 'failureData', `${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}`, Onyx.METHOD.MERGE);
+                expect(violationsFailure.value).toEqual(existingViolations);
+            } finally {
+                writeSpy.mockRestore();
             }
         });
     });
@@ -303,7 +552,7 @@ describe('actions/IOU/Receipt', () => {
         it('should do nothing when transactionID is undefined', async () => {
             const transactionsBefore = await getOnyxValue(ONYXKEYS.COLLECTION.TRANSACTION);
 
-            detachReceipt(undefined, undefined, undefined, undefined);
+            detachReceipt(undefined, undefined, undefined, undefined, undefined);
             await waitForBatchedUpdates();
 
             const transactionsAfter = await getOnyxValue(ONYXKEYS.COLLECTION.TRANSACTION);
@@ -316,12 +565,12 @@ describe('actions/IOU/Receipt', () => {
             await seedOnyx();
 
             try {
-                detachReceipt(transactionID, undefined, undefined, undefined);
+                detachReceipt(transaction, undefined, undefined, undefined, undefined);
                 await waitForBatchedUpdates();
 
-                const onyxData = writeSpy.mock.calls.at(0)?.at(2) as {optimisticData?: Array<{key: string; value: unknown}>};
-                const transactionOptimistic = onyxData?.optimisticData?.find((update) => update.key === `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`);
-                expect(transactionOptimistic?.value).toEqual(
+                const [, , onyxData] = getRequiredWriteCall(writeSpy.mock.calls, 0);
+                const transactionOptimistic = getRequiredOnyxUpdate(onyxData, 'optimisticData', `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, Onyx.METHOD.MERGE, true);
+                expect(transactionOptimistic.value).toEqual(
                     expect.objectContaining({
                         receipt: null,
                         pendingFields: {receipt: CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE},
@@ -335,7 +584,7 @@ describe('actions/IOU/Receipt', () => {
         it('should create an optimistic report action and update report timestamps', async () => {
             await seedOnyx();
 
-            detachReceipt(transactionID, undefined, undefined, undefined);
+            detachReceipt(transaction, undefined, undefined, undefined, report);
             await waitForBatchedUpdates();
 
             // Then a new report action should be created on the report
@@ -354,7 +603,7 @@ describe('actions/IOU/Receipt', () => {
             await seedOnyx();
 
             try {
-                detachReceipt(transactionID, undefined, undefined, undefined);
+                detachReceipt(transaction, undefined, undefined, undefined, undefined);
                 await waitForBatchedUpdates();
 
                 expect(writeSpy).toHaveBeenCalledWith(WRITE_COMMANDS.DETACH_RECEIPT, expect.objectContaining({transactionID}), expect.anything(), expect.anything());
@@ -366,7 +615,7 @@ describe('actions/IOU/Receipt', () => {
         it('should compute violations when policy is paid group', async () => {
             await seedOnyx();
 
-            detachReceipt(transactionID, policy, policyTagList, undefined);
+            detachReceipt(transaction, policy, policyTagList, undefined, undefined);
             await waitForBatchedUpdates();
 
             const violations = await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}`);

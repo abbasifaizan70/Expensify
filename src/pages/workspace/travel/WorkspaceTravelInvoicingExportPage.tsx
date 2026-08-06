@@ -1,7 +1,5 @@
-import {endOfMonth, format, startOfMonth} from 'date-fns';
-import React, {useCallback, useEffect, useRef, useState} from 'react';
 import FullPageOfflineBlockingView from '@components/BlockingViews/FullPageOfflineBlockingView';
-import Button from '@components/Button';
+import Button from '@components/ButtonComposed';
 import FormHelpMessage from '@components/FormHelpMessage';
 import HeaderWithBackButton from '@components/HeaderWithBackButton';
 import ScreenWrapper from '@components/ScreenWrapper';
@@ -9,21 +7,27 @@ import DateFilterBase from '@components/Search/FilterComponents/DateFilterBase';
 import type {DateFilterBaseHandle} from '@components/Search/FilterComponents/DateFilterBase';
 import type {SearchDateValues} from '@components/Search/FilterComponents/DatePresetFilterBase';
 import type {SearchDatePreset} from '@components/Search/types';
+
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
 import usePrevious from '@hooks/usePrevious';
 import useThemeStyles from '@hooks/useThemeStyles';
+
 import {exportTravelInvoiceStatementCSV, getTravelInvoiceStatementPDF} from '@libs/actions/TravelInvoicing';
 import Navigation from '@libs/Navigation/Navigation';
 import type {PlatformStackScreenProps} from '@libs/Navigation/PlatformStackNavigation/types';
 import type {SettingsNavigatorParamList} from '@libs/Navigation/types';
 import {getDateRangeForPreset, getRangeBoundariesFromFormValue, isSearchDatePreset} from '@libs/SearchQueryUtils';
 import {downloadTravelInvoiceStatementPDF} from '@libs/TravelInvoicingUtils';
+
 import CONFIG from '@src/CONFIG';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type SCREENS from '@src/SCREENS';
+
+import {endOfMonth, format, startOfMonth} from 'date-fns';
+import React, {useEffect, useRef, useState} from 'react';
 
 type WorkspaceTravelInvoicingExportPageProps = PlatformStackScreenProps<SettingsNavigatorParamList, typeof SCREENS.WORKSPACE.TRAVEL_EXPORT>;
 
@@ -64,9 +68,7 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
     /**
      * Checks whether the user has a complete date selection.
      * A selection is complete when either ON is set (preset or specific date),
-     * or both AFTER and BEFORE are set. A single After or Before alone is
-     * incomplete — we don't silently fill in today's date for the missing value
-     * because that can produce invalid ranges the backend rejects.
+     * or both range boundaries are set.
      */
     const hasDateSelected = (valuesToValidate?: SearchDateValues): boolean => {
         const values = valuesToValidate ?? dateFilterBaseRef.current?.getDateValues();
@@ -79,13 +81,7 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
         }
 
         const {from: rangeStart, to: rangeEnd} = getSelectedRangeBoundaries(values);
-        if (rangeStart && rangeEnd) {
-            return true;
-        }
-
-        // Both after and before must be set for a complete range
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- We intentionally use logical OR (||) instead of ?? because these values are strings and we want to treat empty strings as "not set" (i.e., falsy).
-        return !!(values[CONST.SEARCH.DATE_MODIFIERS.AFTER] && values[CONST.SEARCH.DATE_MODIFIERS.BEFORE]);
+        return !!(rangeStart && rangeEnd);
     };
 
     /**
@@ -93,18 +89,9 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
      */
     const isDateRangeInvalid = (valuesToValidate?: SearchDateValues): boolean => {
         const values = valuesToValidate ?? dateFilterBaseRef.current?.getDateValues();
-        const dateAfter = values?.[CONST.SEARCH.DATE_MODIFIERS.AFTER];
-        const dateBefore = values?.[CONST.SEARCH.DATE_MODIFIERS.BEFORE];
         const {from: rangeStart, to: rangeEnd} = getSelectedRangeBoundaries(values);
 
-        if (rangeStart && rangeEnd && rangeStart > rangeEnd) {
-            return true;
-        }
-
-        if (dateAfter && dateBefore && dateAfter > dateBefore) {
-            return true;
-        }
-        return false;
+        return !!(rangeStart && rangeEnd && rangeStart > rangeEnd);
     };
 
     /**
@@ -125,13 +112,11 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
     /**
      * Computes startDate and endDate in YYYY-MM-DD format from the current date selection.
      * Callers must validate via hasDateSelected() before calling — this function
-     * assumes the selection is complete (ON is set, or both AFTER and BEFORE are set).
+     * assumes the selection is complete (ON is set, or both range boundaries are set).
      */
-    const getDateRange = useCallback((): {startDate: string; endDate: string} => {
+    const getDateRange = (): {startDate: string; endDate: string} => {
         const values = dateFilterBaseRef.current?.getDateValues();
         const dateOn = values?.[CONST.SEARCH.DATE_MODIFIERS.ON];
-        const dateAfter = values?.[CONST.SEARCH.DATE_MODIFIERS.AFTER];
-        const dateBefore = values?.[CONST.SEARCH.DATE_MODIFIERS.BEFORE];
         const {from: rangeStart, to: rangeEnd} = getSelectedRangeBoundaries(values);
 
         if (dateOn) {
@@ -147,26 +132,19 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
             return {startDate: rangeStart, endDate: rangeEnd};
         }
 
-        if (dateAfter && dateBefore) {
-            return {
-                startDate: dateAfter,
-                endDate: dateBefore,
-            };
-        }
-
         // Default: this month (only reached on initial mount before any interaction)
         const now = new Date();
         return {
             startDate: format(startOfMonth(now), 'yyyy-MM-dd'),
             endDate: format(endOfMonth(now), 'yyyy-MM-dd'),
         };
-    }, []);
+    };
 
     /**
      * Handles PDF export — always requests fresh generation from the backend.
      * The useEffect below auto-downloads the file once generation completes.
      */
-    const processDownload = useCallback(() => {
+    const processDownload = () => {
         if (isGenerating) {
             return;
         }
@@ -185,7 +163,7 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
 
         setIsDownloading(true);
         getTravelInvoiceStatementPDF(policyID, startDate, endDate);
-    }, [getDateRange, hasDateSelected, isDateRangeInvalid, isGenerating, policyID, translate]);
+    };
 
     useEffect(() => {
         if (!prevIsGenerating || isGenerating) {
@@ -245,8 +223,10 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
             <FullPageOfflineBlockingView>
                 <DateFilterBase
                     ref={dateFilterBaseRef}
+                    style={styles.flex1}
                     defaultDateValues={defaultDateValues}
                     presets={presets}
+                    shouldShowCustomDate={false}
                     onSubmit={onSubmit}
                     onDateValuesChange={handleDateValuesChange}
                     onDateModifierChange={setIsDateModifierOpen}
@@ -263,19 +243,21 @@ function WorkspaceTravelInvoicingExportPage({route}: WorkspaceTravelInvoicingExp
                             />
                         )}
                         <Button
-                            text={translate('workspace.moreFeatures.travel.travelInvoicing.exportToPDF')}
                             style={[styles.mh4, styles.mt3]}
                             onPress={processDownload}
                             isLoading={isDownloading}
-                            large
-                        />
+                            size={CONST.BUTTON_SIZE.LARGE}
+                        >
+                            <Button.Text>{translate('workspace.moreFeatures.travel.travelInvoicing.exportToPDF')}</Button.Text>
+                        </Button>
                         <Button
-                            text={translate('workspace.moreFeatures.travel.travelInvoicing.exportToCSV')}
                             style={[styles.m4, styles.mt3, styles.mb5]}
                             onPress={handleDownloadCSV}
-                            success
-                            large
-                        />
+                            variant={CONST.BUTTON_VARIANT.SUCCESS}
+                            size={CONST.BUTTON_SIZE.LARGE}
+                        >
+                            <Button.Text>{translate('workspace.moreFeatures.travel.travelInvoicing.exportToCSV')}</Button.Text>
+                        </Button>
                     </>
                 )}
             </FullPageOfflineBlockingView>

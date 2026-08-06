@@ -1,6 +1,8 @@
 import {READ_COMMANDS, SIDE_EFFECT_REQUEST_COMMANDS, WRITE_COMMANDS} from '@libs/API/types';
 import FraudProtection from '@libs/FraudProtection';
+
 import CONST, {FRAUD_PROTECTION_EVENT} from '@src/CONST';
+
 import type Middleware from './types';
 
 type FraudSignal = {
@@ -16,11 +18,22 @@ type FraudSignalFactory = (requestData?: Record<string, unknown>, responseData?:
 
 // Flag commands that create new accounts so the fraud protection backend can detect invite spam.
 const createNewAccountCountSignal: FraudSignalFactory = (_, responseData) => {
-    if (!responseData?.newAccountCount) {
+    const newAccountCount = responseData?.newAccountCount;
+    if (typeof newAccountCount !== 'number' || newAccountCount <= 0) {
         return undefined;
     }
-    return {event: FRAUD_PROTECTION_EVENT.NEW_EMAILS_INVITED, attribute: {key: 'new_account_count', value: responseData.newAccountCount as string}};
+    return {event: FRAUD_PROTECTION_EVENT.NEW_EMAILS_INVITED, attribute: {key: 'new_account_count', value: newAccountCount.toString()}};
 };
+
+const buildHashedCardNumberAttribute = (responseData: Record<string, unknown> | undefined): FraudSignal['attribute'] => {
+    const pan = responseData?.pan;
+    return typeof pan === 'string' && pan ? {key: 'hashed_card_number', value: pan, shouldHash: true} : undefined;
+};
+
+const revealedCardFraudSignal: FraudSignalFactory = (_, responseData) => ({
+    event: FRAUD_PROTECTION_EVENT.VIEW_VIRTUAL_CARD_PAN,
+    attribute: buildHashedCardNumberAttribute(responseData),
+});
 
 const fraudSignalFactoryByApiCommand: Record<string, FraudSignalFactory> = {
     [READ_COMMANDS.SIGN_IN_WITH_SUPPORT_AUTH_TOKEN]: () => ({event: FRAUD_PROTECTION_EVENT.START_SUPPORT_SESSION}),
@@ -37,10 +50,8 @@ const fraudSignalFactoryByApiCommand: Record<string, FraudSignalFactory> = {
         requestData?.isVirtualCard === true ? {event: FRAUD_PROTECTION_EVENT.EDIT_LIMIT_ADMIN_ISSUE_VIRTUAL_CARD} : {event: FRAUD_PROTECTION_EVENT.EDIT_EXPENSIFY_CARD_LIMIT},
     [WRITE_COMMANDS.ADD_PAYMENT_CARD]: () => ({event: FRAUD_PROTECTION_EVENT.ADD_BILLING_CARD}),
     [WRITE_COMMANDS.ADD_PAYMENT_CARD_SCA]: () => ({event: FRAUD_PROTECTION_EVENT.ADD_BILLING_CARD}),
-    [SIDE_EFFECT_REQUEST_COMMANDS.REVEAL_EXPENSIFY_CARD_DETAILS]: (_, responseData) => {
-        const panAttribute = responseData?.pan ? {key: 'hashed_card_number', value: responseData?.pan as string, shouldHash: true} : undefined;
-        return {event: FRAUD_PROTECTION_EVENT.VIEW_VIRTUAL_CARD_PAN, attribute: panAttribute};
-    },
+    [SIDE_EFFECT_REQUEST_COMMANDS.REVEAL_EXPENSIFY_TRAVEL_CARD_DETAILS]: revealedCardFraudSignal,
+    [SIDE_EFFECT_REQUEST_COMMANDS.SET_PERSONAL_DETAILS_AND_REVEAL_EXPENSIFY_CARD]: revealedCardFraudSignal,
     [WRITE_COMMANDS.FINISH_CORPAY_BANK_ACCOUNT_ONBOARDING]: () => ({event: FRAUD_PROTECTION_EVENT.BUSINESS_BANK_ACCOUNT_SETUP}),
     [WRITE_COMMANDS.CONNECT_BANK_ACCOUNT_MANUALLY]: () => ({event: FRAUD_PROTECTION_EVENT.BUSINESS_BANK_ACCOUNT_SETUP}),
     [WRITE_COMMANDS.CONNECT_BANK_ACCOUNT_WITH_PLAID]: () => ({event: FRAUD_PROTECTION_EVENT.BUSINESS_BANK_ACCOUNT_SETUP}),
@@ -49,6 +60,7 @@ const fraudSignalFactoryByApiCommand: Record<string, FraudSignalFactory> = {
     [WRITE_COMMANDS.INVITE_TO_ROOM]: createNewAccountCountSignal,
     [WRITE_COMMANDS.SEND_MONEY_ELSEWHERE]: createNewAccountCountSignal,
     [WRITE_COMMANDS.SEND_MONEY_WITH_WALLET]: createNewAccountCountSignal,
+    [WRITE_COMMANDS.OPEN_REPORT]: createNewAccountCountSignal,
 };
 
 const FraudMonitoring: Middleware = (response, request) =>

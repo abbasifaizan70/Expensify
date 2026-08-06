@@ -34,13 +34,6 @@ type ReportArchiveReasonsRemovedFromPolicyParams = {
     shouldUseYou?: boolean;
 };
 
-type CreatedReportForUnapprovedTransactionsParams = {
-    reportUrl: string;
-    reportName: string;
-    reportID: string;
-    isReportDeleted: boolean;
-};
-
 type PaidElsewhereParams = {payer?: string; comment?: string};
 
 type MovedFromPersonalSpaceParams = {workspaceName?: string; reportName?: string};
@@ -53,23 +46,15 @@ type NotAllowedExtensionParams = {allowedExtensions: string[]};
 
 type StepCounterParams = {step: number; total?: number; text?: string};
 
-type UserIsAlreadyMemberParams = {login: string; name: string};
-
 type ParentNavigationSummaryParams = {reportName?: string; workspaceName?: string};
-
-type UpdatedTheRequestParams = {valueName: string; newValueToDisplay: string; oldValueToDisplay: string};
-
-type UpdatedTheDistanceMerchantParams = {translatedChangedField: string; newMerchant: string; oldMerchant: string; newAmountToDisplay: string; oldAmountToDisplay: string};
-
-type ViolationsMissingTagParams = {tagName?: string} | undefined;
 
 type ViolationsModifiedAmountParams = {type?: ViolationDataType; displayPercentVariance?: number};
 
 type ViolationsIncreasedDistanceParams = {formattedRouteDistance?: string};
 
-type OptionalParam<T> = Partial<T>;
+type ViolationsInactiveVendorParams = {isSupplier?: boolean};
 
-type LogSizeAndDateParams = {size: number; date: string};
+type OptionalParam<T> = Partial<T>;
 
 type ChangeFieldParams = {oldValue?: string; newValue: string; fieldName: string};
 
@@ -81,6 +66,7 @@ type IntegrationsMessageParams = {
         code?: number;
         messages?: string[];
         title?: string;
+        reconciled?: boolean;
         link?: {
             url: string;
             text: string;
@@ -102,6 +88,14 @@ type ConnectionNameParams = {
     connectionName: AllConnectionName;
 };
 
+type ConnectionDisplayNameParams = {
+    connectionName: string;
+};
+
+type DefaultVendorHelperTextParams = {
+    isSet: boolean;
+};
+
 type ExportAgainModalDescriptionParams = {
     reportName: string;
     connectionName: ConnectionName;
@@ -109,25 +103,19 @@ type ExportAgainModalDescriptionParams = {
 
 type UpdateRoleParams = {email: string; currentRole: string; newRole: string};
 
-type RemoveMemberParams = {email: string; role: string};
-
-type StatementPageTitleParams = {year: string | number; monthName: string};
-
-type DisconnectPromptParams = {currentIntegration?: ConnectionName} | undefined;
-
-type DisconnectTitleParams = {integration?: ConnectionName} | undefined;
-
-type LowerUpperParams = {lower: string; upper: string};
-
 type YourPlanPriceParams = {lower: string; upper: string};
 
 type ExportIntegrationSelectedParams = {connectionName: ConnectionName};
 
 type IntacctMappingTitleParams = {mappingName: SageIntacctMappingName};
 
-type SyncStageNameConnectionsParams = {stage: PolicyConnectionSyncStage};
+type AccountingIntegrationNameParams = {integrationName?: string};
+
+type SyncStageNameConnectionsParams = {stage: PolicyConnectionSyncStage; integrationName?: string};
 
 type DelegateRoleParams = {role: DelegateRole};
+
+type RemoveCopilotAccessConfirmationParams = {delegatorName: string};
 
 type RemovedFromApprovalWorkflowParams = {
     submittersNames: string[];
@@ -156,18 +144,22 @@ type ConciergeBrokenCardConnectionParams = {
     connectionLink?: string;
 };
 
+type EmptyViolationSnapshotResultsSubtitleParams = {
+    formattedDate: string;
+};
+
 export type {
     MissingPropertyParams,
     InvalidPropertyParams,
     InvalidValueParams,
     RemovedFromApprovalWorkflowParams,
     DelegateRoleParams,
+    RemoveCopilotAccessConfirmationParams,
+    AccountingIntegrationNameParams,
     SyncStageNameConnectionsParams,
     IntacctMappingTitleParams,
     ExportIntegrationSelectedParams,
     YourPlanPriceParams,
-    LowerUpperParams,
-    LogSizeAndDateParams,
     DeleteActionParams,
     DeleteConfirmationParams,
     EditActionParams,
@@ -176,20 +168,17 @@ export type {
     ParentNavigationSummaryParams,
     PaidElsewhereParams,
     ConciergeBrokenCardConnectionParams,
+    EmptyViolationSnapshotResultsSubtitleParams,
     ReportArchiveReasonsClosedParams,
     ReportArchiveReasonsMergedParams,
     ReportArchiveReasonsInvoiceReceiverPolicyDeletedParams,
-    CreatedReportForUnapprovedTransactionsParams,
     ReportArchiveReasonsRemovedFromPolicyParams,
     ResolutionConstraintsParams,
     SizeExceededParams,
     StepCounterParams,
-    UpdatedTheDistanceMerchantParams,
-    UpdatedTheRequestParams,
-    UserIsAlreadyMemberParams,
-    ViolationsMissingTagParams,
     ViolationsModifiedAmountParams,
     ViolationsIncreasedDistanceParams,
+    ViolationsInactiveVendorParams,
     ChangeFieldParams,
     ExportedToIntegrationParams,
     IntegrationsMessageParams,
@@ -198,12 +187,10 @@ export type {
     UnshareParams,
     UnsupportedFormulaValueErrorParams,
     ConnectionNameParams,
+    ConnectionDisplayNameParams,
+    DefaultVendorHelperTextParams,
     ExportAgainModalDescriptionParams,
     UpdateRoleParams,
-    RemoveMemberParams,
-    StatementPageTitleParams,
-    DisconnectPromptParams,
-    DisconnectTitleParams,
     OptionalParam,
     WorkspaceLockedPlanTypeParams,
 };

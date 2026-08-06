@@ -1,18 +1,25 @@
-import React, {useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState} from 'react';
-import type {Ref} from 'react';
 import CalendarPicker from '@components/DatePicker/CalendarPicker';
 import MenuItem from '@components/MenuItem';
 import type {SearchDatePreset} from '@components/Search/types';
 import SingleSelectListItem from '@components/SelectionList/ListItem/SingleSelectListItem';
 import SpacerView from '@components/SpacerView';
+
 import useLocalize from '@hooks/useLocalize';
 import useStyleUtils from '@hooks/useStyleUtils';
 import useTheme from '@hooks/useTheme';
 import useThemeStyles from '@hooks/useThemeStyles';
+
 import type {SearchDateValues} from '@libs/SearchQueryUtils';
 import {getDateRangeDisplayValueFromFormValue, getEmptyDateValues, getRangeBoundariesFromFormValue, getRangeQueryValue, isSearchDatePreset} from '@libs/SearchQueryUtils';
 import type {SearchDateModifier, SearchDateModifierLower} from '@libs/SearchUIUtils';
+
 import CONST from '@src/CONST';
+
+import type {Ref} from 'react';
+
+import React, {useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState} from 'react';
+import {View} from 'react-native';
+
 import RangeDatePicker from './RangeDatePicker';
 
 type CustomDateModifier = Exclude<SearchDateModifier, typeof CONST.SEARCH.DATE_MODIFIERS.RANGE>;
@@ -90,6 +97,9 @@ type DatePresetFilterBaseProps = {
     /** The date presets */
     presets?: SearchDatePreset[];
 
+    /** Whether to show the "Custom date" (On/After/Before) option. Defaults to true. */
+    shouldShowCustomDate?: boolean;
+
     /** Whether the search advanced filters form Onyx data is loading or not */
     isSearchAdvancedFiltersFormLoading?: boolean;
 
@@ -118,6 +128,7 @@ function DatePresetFilterBase({
     selectedDateModifier,
     onSelectDateModifier,
     presets,
+    shouldShowCustomDate = true,
     isSearchAdvancedFiltersFormLoading,
     onDateValuesChange,
     onRangeValidationErrorChange,
@@ -160,6 +171,7 @@ function DatePresetFilterBase({
 
     const [dateValues, setDateValues] = useState<SearchDateValues>(normalizedDefaultDateValues);
     const dateValuesRef = useRef<SearchDateValues>(normalizedDefaultDateValues);
+    const [focusedPresetKey, setFocusedPresetKey] = useState<string | null>(null);
     const updateDateValues = useCallback(
         (updater: SearchDateValues | ((prevDateValues: SearchDateValues) => SearchDateValues), shouldNotify = true) => {
             const nextDateValues = typeof updater === 'function' ? updater(dateValuesRef.current) : updater;
@@ -190,7 +202,7 @@ function DatePresetFilterBase({
         }
 
         dateValuesRef.current = normalizedDefaultDateValues;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
+
         setDateValues(normalizedDefaultDateValues);
     }, [isSearchAdvancedFiltersFormLoading, normalizedDefaultDateValues]);
 
@@ -255,7 +267,7 @@ function DatePresetFilterBase({
         if (selectedDateModifier !== CONST.SEARCH.DATE_MODIFIERS.RANGE) {
             return;
         }
-        // eslint-disable-next-line react-hooks/set-state-in-effect
+
         setDateValue(CONST.SEARCH.DATE_MODIFIERS.RANGE, getRangeQueryValue(rangeEphemeralValues.from, rangeEphemeralValues.to) || undefined);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [rangeEphemeralValues.from, rangeEphemeralValues.to]);
@@ -396,33 +408,41 @@ function DatePresetFilterBase({
     if (!selectedDateModifier) {
         return (
             <>
-                {presets?.map((preset) => (
-                    <SingleSelectListItem
-                        key={preset}
-                        keyForList={preset}
-                        showTooltip
-                        item={{
-                            keyForList: preset,
-                            text: translate(`search.filters.date.presets.${preset}`),
-                            isSelected: dateValues[CONST.SEARCH.DATE_MODIFIERS.ON] === preset,
-                        }}
-                        onSelectRow={() => setExclusiveDateValue(CONST.SEARCH.DATE_MODIFIERS.ON, preset)}
-                        wrapperStyle={styles.flexReset}
-                    />
-                ))}
+                <View onBlur={() => setFocusedPresetKey(null)}>
+                    {presets?.map((preset) => (
+                        <SingleSelectListItem
+                            key={preset}
+                            keyForList={preset}
+                            showTooltip
+                            item={{
+                                keyForList: preset,
+                                text: translate(`search.filters.date.presets.${preset}`),
+                                isSelected: dateValues[CONST.SEARCH.DATE_MODIFIERS.ON] === preset,
+                            }}
+                            onSelectRow={() => setExclusiveDateValue(CONST.SEARCH.DATE_MODIFIERS.ON, preset)}
+                            wrapperStyle={[styles.flexReset, styles.optionRowCompact]}
+                            isFocused={focusedPresetKey === preset}
+                            isFocusVisible={focusedPresetKey === preset}
+                            onFocus={() => setFocusedPresetKey(preset)}
+                            shouldSyncFocus={false}
+                        />
+                    ))}
+                </View>
                 {shouldShowHorizontalRule && (
                     <SpacerView
                         shouldShow
                         style={[StyleUtils.getBorderColorStyle(theme.border), styles.mh3]}
                     />
                 )}
-                <MenuItem
-                    shouldShowRightIcon
-                    viewMode={CONST.OPTION_MODE.COMPACT}
-                    title={customDateTitle}
-                    description={customDateDescription}
-                    onPress={selectCustomDateMode}
-                />
+                {shouldShowCustomDate && (
+                    <MenuItem
+                        shouldShowRightIcon
+                        viewMode={CONST.OPTION_MODE.COMPACT}
+                        title={customDateTitle}
+                        description={customDateDescription}
+                        onPress={selectCustomDateMode}
+                    />
+                )}
                 <MenuItem
                     shouldShowRightIcon
                     viewMode={CONST.OPTION_MODE.COMPACT}
@@ -475,7 +495,7 @@ function DatePresetFilterBase({
                         isSelected: selectedDateModifier === dateModifier,
                     }}
                     onSelectRow={() => selectDateModifier(dateModifier)}
-                    wrapperStyle={styles.flexReset}
+                    wrapperStyle={[styles.flexReset, styles.optionRowCompact]}
                 />
             ))}
         </>

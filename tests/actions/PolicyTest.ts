@@ -1,25 +1,41 @@
-import {Str} from 'expensify-common';
-import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
-import Onyx from 'react-native-onyx';
+import type {GuidedSetupTask} from '@libs/actions/Report';
+import * as APIModule from '@libs/API';
 import {WRITE_COMMANDS} from '@libs/API/types';
 import GoogleTagManager from '@libs/GoogleTagManager';
-// eslint-disable-next-line no-restricted-syntax
 import * as PersonalDetailsUtils from '@libs/PersonalDetailsUtils';
-// eslint-disable-next-line no-restricted-syntax -- this is needed to allow mocking
+import {isPolicyPayer} from '@libs/PolicyUtils';
 import * as ReportUtils from '@libs/ReportUtils';
+
 import CONST from '@src/CONST';
 import IntlStore from '@src/languages/IntlStore';
 import OnyxUpdateManager from '@src/libs/actions/OnyxUpdateManager';
 import {askToJoinPolicy, joinAccessiblePolicy} from '@src/libs/actions/Policy/Member';
 import * as Policy from '@src/libs/actions/Policy/Policy';
 import ONYXKEYS from '@src/ONYXKEYS';
-import type {Onboarding, PolicyJoinMember, PolicyReportField, Policy as PolicyType, Report, ReportAction, ReportActions, TransactionViolations} from '@src/types/onyx';
-import type {Participant} from '@src/types/onyx/Report';
+import type {Onboarding, PolicyJoinMember, PolicyReportField, Policy as PolicyType, Report, ReportAction, ReportActions, Transaction, TransactionViolations} from '@src/types/onyx';
+import type {Participant, ReportNextStep} from '@src/types/onyx/Report';
+
+import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
+
+import {Str} from 'expensify-common';
+import Onyx from 'react-native-onyx';
+
 import createRandomPolicy from '../utils/collections/policies';
 import {createRandomReport} from '../utils/collections/reports';
+import createRandomTransaction from '../utils/collections/transaction';
+import createMock from '../utils/createMock';
 import getOnyxValue from '../utils/getOnyxValue';
 import * as TestHelper from '../utils/TestHelper';
-import type {MockFetch} from '../utils/TestHelper';
+import {
+    getOptionalNumberProperty,
+    isGuidedSetupTask,
+    parseJSONArray,
+    parseJSONRecord,
+    readProperty,
+    requireRecord,
+    requireRecordArrayProperty,
+    requireStringProperty,
+} from '../utils/typeGuards';
 import waitForBatchedUpdates from '../utils/waitForBatchedUpdates';
 
 const ESH_EMAIL = 'eshgupta1217@gmail.com';
@@ -36,6 +52,13 @@ const TEST_PHONE_NUMBER = '1234567890';
 const TEST_NON_PUBLIC_DOMAIN_EMAIL = 'esh@example.com';
 const TEST_SMS_DOMAIN_EMAIL = 'esh@expensify.sms';
 
+function requireCallArgument(call: unknown, index: number): unknown {
+    if (!Array.isArray(call) || !(index in call)) {
+        throw new Error(`Expected API call argument ${index}`);
+    }
+    return call.at(index);
+}
+
 jest.mock('@libs/GoogleTagManager');
 
 OnyxUpdateManager();
@@ -46,10 +69,10 @@ describe('actions/Policy', () => {
         });
     });
 
-    let mockFetch: MockFetch;
+    let mockFetch: ReturnType<typeof TestHelper.createGlobalFetchMock>;
     beforeEach(() => {
-        global.fetch = TestHelper.getGlobalFetchMock();
-        mockFetch = fetch as MockFetch;
+        mockFetch = TestHelper.createGlobalFetchMock();
+        global.fetch = mockFetch;
         IntlStore.load(CONST.LOCALES.EN);
         jest.clearAllMocks();
         return Onyx.clear().then(waitForBatchedUpdates);
@@ -61,7 +84,7 @@ describe('actions/Policy', () => {
         });
 
         it('creates a new workspace', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             const fakePolicy = createRandomPolicy(0, CONST.POLICY.TYPE.PERSONAL);
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
@@ -74,6 +97,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
 
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -82,9 +106,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: CONST.CURRENCY.USD,
                 isSelfTourViewed: false,
                 betas: [CONST.BETAS.SUGGESTED_FOLLOWUPS],
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -118,6 +144,13 @@ describe('actions/Policy', () => {
             expect(policy?.role).toBe(CONST.POLICY.ROLE.ADMIN);
             expect(policy?.owner).toBe(ESH_EMAIL);
             expect(policy?.areWorkflowsEnabled).toBe(true);
+            expect(policy?.areDistanceRatesEnabled).toBe(false);
+            expect(policy?.areReportFieldsEnabled).toBe(false);
+            expect(policy?.areConnectionsEnabled).toBe(false);
+            expect(policy?.areExpensifyCardsEnabled).toBe(false);
+            expect(policy?.areInvoicesEnabled).toBe(false);
+            expect(policy?.areRulesEnabled).toBe(false);
+            expect(policy?.arePerDiemRatesEnabled).toBe(false);
             expect(policy?.approvalMode).toBe(CONST.POLICY.APPROVAL_MODE.BASIC);
             expect(policy?.approver).toBe(ESH_EMAIL);
             expect(policy?.isPolicyExpenseChatEnabled).toBe(true);
@@ -125,11 +158,11 @@ describe('actions/Policy', () => {
             expect(policy?.employeeList).toEqual({[ESH_EMAIL]: {email: ESH_EMAIL, submitsTo: ESH_EMAIL, errors: {}, role: CONST.POLICY.ROLE.ADMIN}});
             expect(policy?.mccGroup).toBeDefined();
             expect(policy?.requiresCategory).toBe(true);
+            expect(policy?.outputCurrency).toBe(CONST.CURRENCY.USD);
 
             let allReports: OnyxCollection<Report> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT,
-                    waitForCollectionCallback: true,
                     callback: (reports) => {
                         Onyx.disconnect(connection);
                         resolve(reports);
@@ -163,7 +196,6 @@ describe('actions/Policy', () => {
             let reportActions: OnyxCollection<ReportActions> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT_ACTIONS,
-                    waitForCollectionCallback: true,
                     callback: (actions) => {
                         Onyx.disconnect(connection);
                         resolve(actions);
@@ -185,9 +217,11 @@ describe('actions/Policy', () => {
             // We do not pass tasks to `#admins` channel in favour of backed generated followup-list
             const expectedManageTeamDefaultTasksCount = 0;
 
-            // After filtering, two actions are added to the list =- signoff message (+1) and default create action (+1)
+            // The user has already completed onboarding (introSelected.choice is set), so the onboarding-tasks block
+            // in buildPolicyData is skipped — no signoff message is attached to the new workspace's #admins room.
+            // Only the default CREATED action remains.
             const expectedReportActionsOfTypeCreatedCount = 1;
-            const expectedSignOffMessagesCount = 1;
+            const expectedSignOffMessagesCount = 0;
             expect(adminReportActions.length).toBe(expectedManageTeamDefaultTasksCount + expectedReportActionsOfTypeCreatedCount + expectedSignOffMessagesCount);
 
             let reportActionsOfTypeCreatedCount = 0;
@@ -213,13 +247,12 @@ describe('actions/Policy', () => {
             expect(manageTeamTasksCount).toBe(expectedManageTeamDefaultTasksCount);
 
             // Check for success data
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.POLICY,
-                    waitForCollectionCallback: true,
                     callback: (workspace) => {
                         Onyx.disconnect(connection);
                         resolve(workspace);
@@ -233,7 +266,6 @@ describe('actions/Policy', () => {
             allReports = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT,
-                    waitForCollectionCallback: true,
                     callback: (reports) => {
                         Onyx.disconnect(connection);
                         resolve(reports);
@@ -250,7 +282,6 @@ describe('actions/Policy', () => {
             reportActions = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT_ACTIONS,
-                    waitForCollectionCallback: true,
                     callback: (actions) => {
                         Onyx.disconnect(connection);
                         resolve(actions);
@@ -268,9 +299,12 @@ describe('actions/Policy', () => {
         });
 
         it('duplicate workspace', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
-            const fakePolicy = createRandomPolicy(10, CONST.POLICY.TYPE.PERSONAL);
+            const fakePolicy = {
+                ...createRandomPolicy(10, CONST.POLICY.TYPE.PERSONAL),
+                employeeList: {},
+            };
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
             await Onyx.set(`${ONYXKEYS.NVP_ACTIVE_POLICY_ID}`, fakePolicy.id);
             await Onyx.set(`${ONYXKEYS.NVP_INTRO_SELECTED}`, {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM});
@@ -341,7 +375,6 @@ describe('actions/Policy', () => {
             let allReports: OnyxCollection<Report> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT,
-                    waitForCollectionCallback: true,
                     callback: (reports) => {
                         Onyx.disconnect(connection);
                         resolve(reports);
@@ -375,7 +408,6 @@ describe('actions/Policy', () => {
             let reportActions: OnyxCollection<ReportActions> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT_ACTIONS,
-                    waitForCollectionCallback: true,
                     callback: (actions) => {
                         Onyx.disconnect(connection);
                         resolve(actions);
@@ -413,13 +445,12 @@ describe('actions/Policy', () => {
             expect(reportActionsOfTypeCreatedCount).toBe(expectedReportActionsOfTypeCreatedCount);
 
             // Check for success data
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.POLICY,
-                    waitForCollectionCallback: true,
                     callback: (workspace) => {
                         Onyx.disconnect(connection);
                         resolve(workspace);
@@ -433,7 +464,6 @@ describe('actions/Policy', () => {
             allReports = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT,
-                    waitForCollectionCallback: true,
                     callback: (reports) => {
                         Onyx.disconnect(connection);
                         resolve(reports);
@@ -450,7 +480,6 @@ describe('actions/Policy', () => {
             reportActions = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT_ACTIONS,
-                    waitForCollectionCallback: true,
                     callback: (actions) => {
                         Onyx.disconnect(connection);
                         resolve(actions);
@@ -637,7 +666,6 @@ describe('actions/Policy', () => {
             const allReports: OnyxCollection<Report> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT,
-                    waitForCollectionCallback: true,
                     callback: (reports) => {
                         Onyx.disconnect(connection);
                         resolve(reports);
@@ -659,7 +687,7 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            const file = {uri: 'file://tmp/avatar.png', name: 'avatar.png', type: 'image/png'} as File;
+            const file = createMock<File>({uri: 'file://tmp/avatar.png', name: 'avatar.png', type: 'image/png'});
             const options = {
                 currentUserAccountID: ESH_ACCOUNT_ID,
                 currentUserEmail: ESH_EMAIL,
@@ -740,7 +768,6 @@ describe('actions/Policy', () => {
             const allReports: OnyxCollection<Report> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT,
-                    waitForCollectionCallback: true,
                     callback: (reports) => {
                         Onyx.disconnect(connection);
                         resolve(reports);
@@ -754,7 +781,6 @@ describe('actions/Policy', () => {
             const reportActions: OnyxCollection<ReportActions> = await new Promise((resolve) => {
                 const connection = Onyx.connect({
                     key: ONYXKEYS.COLLECTION.REPORT_ACTIONS,
-                    waitForCollectionCallback: true,
                     callback: (actions) => {
                         Onyx.disconnect(connection);
                         resolve(actions);
@@ -769,10 +795,112 @@ describe('actions/Policy', () => {
             expect(messages?.at(0)?.text).toBe(callerEmail);
         });
 
+        it('duplicate workspace with distance rates clones all source rates in optimistic data with the default rebound to the API-known rate ID', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+
+            const sourceDistanceUnitID = 'srcDistUnit';
+            const sourceDefaultRateID = 'srcDefaultRate';
+            const sourceExtraRateID = 'srcExtraRate';
+            const fakePolicy: PolicyType = {
+                ...createRandomPolicy(19, CONST.POLICY.TYPE.TEAM),
+                customUnits: {
+                    [sourceDistanceUnitID]: {
+                        customUnitID: sourceDistanceUnitID,
+                        name: CONST.CUSTOM_UNITS.NAME_DISTANCE,
+                        enabled: true,
+                        attributes: {unit: CONST.CUSTOM_UNITS.DISTANCE_UNIT_MILES},
+                        rates: {
+                            [sourceDefaultRateID]: {customUnitRateID: sourceDefaultRateID, name: 'Default Rate', rate: 72.5, currency: 'USD', enabled: true, index: 0},
+                            [sourceExtraRateID]: {customUnitRateID: sourceExtraRateID, name: 'Extra Rate', rate: 100, currency: 'USD', enabled: true, index: 1},
+                        },
+                    },
+                },
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+            const options = {
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                policyName: 'Distance Rates Duplicate',
+                policyID: fakePolicy.id,
+                targetPolicyID: policyID,
+                welcomeNote: 'Join my policy',
+                parts: {
+                    people: false,
+                    reports: false,
+                    connections: false,
+                    categories: false,
+                    tags: false,
+                    taxes: false,
+                    perDiem: false,
+                    reimbursements: false,
+                    expenses: false,
+                    distance: true,
+                    invoices: false,
+                    exportLayouts: false,
+                },
+                localCurrency: 'USD',
+            };
+
+            // Pause the API call so successData (which clears the optimistic source rate IDs) does not
+            // run yet — this lets us inspect the optimistic state the user sees offline.
+            mockFetch.pause();
+            Policy.duplicateWorkspace(fakePolicy, options);
+            await waitForBatchedUpdates();
+
+            const duplicatePolicy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
+                const connection = Onyx.connect({
+                    key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                    callback: (workspace) => {
+                        Onyx.disconnect(connection);
+                        resolve(workspace);
+                    },
+                });
+            });
+
+            expect(duplicatePolicy?.areDistanceRatesEnabled).toBe(true);
+            const distanceUnit = Object.values(duplicatePolicy?.customUnits ?? {}).find((unit) => unit.name === CONST.CUSTOM_UNITS.NAME_DISTANCE);
+            if (!distanceUnit) {
+                throw new Error('Expected duplicated distance unit');
+            }
+            // The duplicated unit's customUnitID should differ from the source's (fresh ID).
+            expect(distanceUnit.customUnitID).not.toBe(sourceDistanceUnitID);
+            // Both rates should be present in optimistic data: the extra rate keeps its source ID,
+            // and the default is rebound to a fresh API-known customUnitRateID.
+            const rateKeys = Object.keys(distanceUnit.rates);
+            expect(rateKeys).toContain(sourceExtraRateID);
+            expect(rateKeys).not.toContain(sourceDefaultRateID);
+            expect(rateKeys).toHaveLength(2);
+            // The Default Rate should be the one picked by getDefaultDistanceRate (lowest enabled index).
+            const defaultRate = Object.values(distanceUnit.rates)
+                .filter((rate) => rate.enabled !== false)
+                .sort((a, b) => (a.index ?? CONST.DEFAULT_NUMBER_ID) - (b.index ?? CONST.DEFAULT_NUMBER_ID))
+                .at(0);
+            expect(defaultRate?.name).toBe('Default Rate');
+            expect(defaultRate?.rate).toBe(72.5);
+            // The default rate's customUnitRateID matches its dictionary key (rebound).
+            expect(defaultRate?.customUnitRateID).not.toBe(sourceDefaultRateID);
+            const defaultRateID = defaultRate?.customUnitRateID;
+            if (!defaultRateID) {
+                throw new Error('Expected default rate to have a customUnitRateID');
+            }
+            expect(distanceUnit.rates[defaultRateID]).toBe(defaultRate);
+
+            // Resume the mocked fetch so the API call resolves; the duplicated workspace's optimistic
+            // rates remain visible until a Pusher response (not mocked here) repopulates them with
+            // the server's rate set. We rely on the server preserving the source's non-default rate
+            // IDs in the duplicate, so the optimistic state and the eventual server state line up.
+            await mockFetch.resume?.();
+            await waitForBatchedUpdates();
+        });
+
         it('creates a new workspace with BASIC approval mode if the introSelected is MANAGE_TEAM', async () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to MANAGE_TEAM
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -781,9 +909,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -804,6 +934,7 @@ describe('actions/Policy', () => {
         it('creates a new workspace when betas are explicitly passed', async () => {
             const policyID = Policy.generatePolicyID();
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -812,8 +943,10 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
                 betas: [CONST.BETAS.SUGGESTED_FOLLOWUPS],
             });
             await waitForBatchedUpdates();
@@ -837,6 +970,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to TRACK_WORKSPACE
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -845,9 +979,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: CONST.CURRENCY.EUR,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -863,16 +999,48 @@ describe('actions/Policy', () => {
 
             // Then the policy should have approval mode set to OPTIONAL
             expect(policy?.approvalMode).toBe(CONST.POLICY.APPROVAL_MODE.OPTIONAL);
+            // And the explicit currency should be honored
+            expect(policy?.outputCurrency).toBe(CONST.CURRENCY.EUR);
+        });
+
+        it('does not reset NVP_INTRO_SELECTED.choice when a TRACK_WORKSPACE user creates a subsequent workspace', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await Onyx.set(`${ONYXKEYS.NVP_INTRO_SELECTED}`, {choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE});
+            await Onyx.set(ONYXKEYS.NVP_ONBOARDING, {hasCompletedGuidedSetupFlow: true, chatReportID: '12345'});
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE,
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: true,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            const introSelected = await getOnyxValue(ONYXKEYS.NVP_INTRO_SELECTED);
+            expect(introSelected?.choice).toBe(CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE);
         });
 
         it('create a new workspace fails will reset hasCompletedGuidedSetupFlow to the correct value', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await Onyx.set(ONYXKEYS.NVP_ONBOARDING, {hasCompletedGuidedSetupFlow: true, chatReportID: '12345'});
             await waitForBatchedUpdates();
 
-            (fetch as MockFetch)?.fail?.();
+            mockFetch?.fail?.();
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -881,19 +1049,20 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.LOOKING_AROUND},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             let onboarding: OnyxEntry<Onboarding>;
             await TestHelper.getOnyxData({
                 key: ONYXKEYS.NVP_ONBOARDING,
-                waitForCollectionCallback: false,
                 callback: (val) => {
                     onboarding = val;
                 },
@@ -905,6 +1074,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to MANAGE_TEAM
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -913,15 +1083,16 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then the autoReportingFrequency should be set to manually
                     expect(policy?.autoReportingFrequency).toBe(CONST.POLICY.AUTO_REPORTING_FREQUENCIES.IMMEDIATE);
@@ -934,6 +1105,7 @@ describe('actions/Policy', () => {
         it('create a new workspace with delayed submission set to manually if the onboarding choice is not selected', async () => {
             const policyID = Policy.generatePolicyID();
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -942,15 +1114,16 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then the autoReportingFrequency should be set to manually
                     expect(policy?.autoReportingFrequency).toBe(CONST.POLICY.AUTO_REPORTING_FREQUENCIES.IMMEDIATE);
@@ -964,6 +1137,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to MANAGE_TEAM
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -972,15 +1146,16 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then the workflows feature is enabled
                     expect(policy?.areWorkflowsEnabled).toBeTruthy();
@@ -992,6 +1167,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to LOOKING_AROUND
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1000,15 +1176,16 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.LOOKING_AROUND},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then the workflows feature is enabled
                     expect(policy?.areWorkflowsEnabled).toBeTruthy();
@@ -1020,6 +1197,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to TRACK_WORKSPACE
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1028,15 +1206,16 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then workflows is enabled
                     expect(policy?.areWorkflowsEnabled).toBeTruthy();
@@ -1048,6 +1227,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to EMPLOYER
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1056,15 +1236,16 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.EMPLOYER},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then workflows are not enabled
                     expect(policy?.areWorkflowsEnabled).toBeFalsy();
@@ -1076,6 +1257,7 @@ describe('actions/Policy', () => {
             const policyID = Policy.generatePolicyID();
             // When a new workspace is created with introSelected set to CHAT_SPLIT
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1084,18 +1266,57 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.CHAT_SPLIT},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             await TestHelper.getOnyxData({
                 key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
-                waitForCollectionCallback: false,
                 callback: (policy) => {
                     // Then workflows are not enabled
                     expect(policy?.areWorkflowsEnabled).toBeFalsy();
+                },
+            });
+        });
+
+        it('creates a Submit workspace with ADVANCED approval mode and correct feature flags', async () => {
+            const policyID = Policy.generatePolicyID();
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.EMPLOYER,
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.EMPLOYER},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+                type: CONST.POLICY.TYPE.SUBMIT,
+                currency: 'USD',
+            });
+            await waitForBatchedUpdates();
+
+            await TestHelper.getOnyxData({
+                key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                callback: (policy) => {
+                    expect(policy?.type).toBe(CONST.POLICY.TYPE.SUBMIT);
+                    expect(policy?.role).toBe(CONST.POLICY.ROLE.EDITOR);
+                    expect(policy?.approvalMode).toBe(CONST.POLICY.APPROVAL_MODE.ADVANCED);
+                    expect(policy?.areWorkflowsEnabled).toBe(true);
+                    expect(policy?.areTagsEnabled).toBe(true);
+                    expect(policy?.areDistanceRatesEnabled).toBe(true);
+                    expect(policy?.areCompanyCardsEnabled).toBe(false);
+                    expect(policy?.harvesting?.enabled).toBe(false);
+                    expect(policy?.autoReportingFrequency).toBe(CONST.POLICY.AUTO_REPORTING_FREQUENCIES.IMMEDIATE);
+                    expect(policy?.employeeList?.[ESH_EMAIL]?.role).toBe(CONST.POLICY.ROLE.EDITOR);
                 },
             });
         });
@@ -1104,11 +1325,12 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
             // When creating a workspace with distance rates feature enabled
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: false,
                 policyName: WORKSPACE_NAME,
@@ -1127,6 +1349,7 @@ describe('actions/Policy', () => {
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -1146,11 +1369,12 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
             // When creating a workspace with isSelfTourViewed set to true
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1159,9 +1383,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: true,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -1181,11 +1407,12 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
             // When creating a workspace with isSelfTourViewed set to false
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1194,9 +1421,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -1214,39 +1443,46 @@ describe('actions/Policy', () => {
 
         it('should mark VIEW_TOUR task as completed in guidedSetupData when isSelfTourViewed is true', async () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            // EMPLOYER posts onboarding tasks to the Concierge chat (not #admins). Set a concierge
+            // report ID so prepareOnboardingOnyxData can resolve a target chat and does not early-return.
+            await Onyx.set(ONYXKEYS.CONCIERGE_REPORT_ID, 'concierge-report-1');
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
-            // When creating a workspace with isSelfTourViewed set to true
-            // Use LOOKING_AROUND as introSelected.choice to ensure VIEW_TOUR task is included
-            // (VIEW_TOUR is filtered out when both introSelected.choice and engagementChoice are MANAGE_TEAM)
+            // When creating a workspace with isSelfTourViewed set to true.
+            // introSelected.choice is left undefined to simulate a user who hasn't completed onboarding yet —
+            // that's the only state in which the onboarding-tasks block runs (see buildPolicyData guard).
+            // EMPLOYER is used because it has a VIEW_TOUR task (testDriveEmployeeTask); MANAGE_TEAM now uses
+            // the bespoke followups path (no tasks) so it no longer exercises this code path.
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
                 policyID,
-                engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
-                introSelected: {choice: CONST.ONBOARDING_CHOICES.LOOKING_AROUND},
+                engagementChoice: CONST.ONBOARDING_CHOICES.EMPLOYER,
+                introSelected: {},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: true,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             // Extract the guidedSetupData from the API call
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
             expect(apiCallArgs).toBeDefined();
-            const params = apiCallArgs?.[1] as {guidedSetupData?: string};
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
             expect(params.guidedSetupData).toBeDefined();
 
             // Parse the guidedSetupData and find the VIEW_TOUR task
-            type GuidedSetupItem = {task?: string; completedTaskReportActionID?: string};
-            const guidedSetupData = JSON.parse(params.guidedSetupData ?? '[]') as GuidedSetupItem[];
-            const viewTourTask = guidedSetupData.find((item) => item.task === CONST.ONBOARDING_TASK_TYPE.VIEW_TOUR);
+            const guidedSetupData = parseJSONArray(params.guidedSetupData, 'guidedSetupData');
+            const viewTourTask = guidedSetupData.find((item): item is GuidedSetupTask => isGuidedSetupTask(item) && item.task === CONST.ONBOARDING_TASK_TYPE.VIEW_TOUR);
 
             // VIEW_TOUR task should have completedTaskReportActionID set when isSelfTourViewed is true
             expect(viewTourTask).toBeDefined();
@@ -1257,38 +1493,46 @@ describe('actions/Policy', () => {
 
         it('should not mark VIEW_TOUR task as completed in guidedSetupData when isSelfTourViewed is false', async () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            // EMPLOYER posts onboarding tasks to the Concierge chat (not #admins). Set a concierge
+            // report ID so prepareOnboardingOnyxData can resolve a target chat and does not early-return.
+            await Onyx.set(ONYXKEYS.CONCIERGE_REPORT_ID, 'concierge-report-1');
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
-            // When creating a workspace with isSelfTourViewed set to false
-            // Use LOOKING_AROUND as introSelected.choice to ensure VIEW_TOUR task is included
+            // When creating a workspace with isSelfTourViewed set to false.
+            // introSelected.choice is left undefined to simulate a user who hasn't completed onboarding yet —
+            // that's the only state in which the onboarding-tasks block runs (see buildPolicyData guard).
+            // EMPLOYER is used because it has a VIEW_TOUR task (testDriveEmployeeTask); MANAGE_TEAM now uses
+            // the bespoke followups path (no tasks) so it no longer exercises this code path.
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
                 policyID,
-                engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
-                introSelected: {choice: CONST.ONBOARDING_CHOICES.LOOKING_AROUND},
+                engagementChoice: CONST.ONBOARDING_CHOICES.EMPLOYER,
+                introSelected: {},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             // Extract the guidedSetupData from the API call
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
             expect(apiCallArgs).toBeDefined();
-            const params = apiCallArgs?.[1] as {guidedSetupData?: string};
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
             expect(params.guidedSetupData).toBeDefined();
 
             // Parse the guidedSetupData and find the VIEW_TOUR task
-            type GuidedSetupItem = {task?: string; completedTaskReportActionID?: string};
-            const guidedSetupData = JSON.parse(params.guidedSetupData ?? '[]') as GuidedSetupItem[];
-            const viewTourTask = guidedSetupData.find((item) => item.task === CONST.ONBOARDING_TASK_TYPE.VIEW_TOUR);
+            const guidedSetupData = parseJSONArray(params.guidedSetupData, 'guidedSetupData');
+            const viewTourTask = guidedSetupData.find((item): item is GuidedSetupTask => isGuidedSetupTask(item) && item.task === CONST.ONBOARDING_TASK_TYPE.VIEW_TOUR);
 
             // VIEW_TOUR task should NOT have completedTaskReportActionID set when isSelfTourViewed is false
             expect(viewTourTask).toBeDefined();
@@ -1297,17 +1541,57 @@ describe('actions/Policy', () => {
             apiWriteSpy.mockRestore();
         });
 
+        it('should post onboarding tasks to the threaded conciergeChat instead of the deprecated CONCIERGE_REPORT_ID fallback', async () => {
+            mockFetch?.pause?.();
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await Onyx.set(ONYXKEYS.CONCIERGE_REPORT_ID, 'deprecated-fallback-report');
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+            const threadedConciergeChat: Report = {
+                ...createRandomReport(1, undefined),
+                reportID: 'threaded-concierge-report',
+            };
+
+            // When creating a workspace with an explicitly threaded conciergeChat (EMPLOYER posts tasks to Concierge)
+            Policy.createWorkspace({
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.EMPLOYER,
+                introSelected: {},
+                conciergeChat: threadedConciergeChat,
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            // Then the onboarding task actions are written optimistically to the threaded report, never the fallback report
+            const threadedReportActions = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}threaded-concierge-report`);
+            expect(Object.keys(threadedReportActions ?? {}).length).toBeGreaterThan(0);
+
+            const fallbackReportActions = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}deprecated-fallback-report`);
+            expect(fallbackReportActions).toBeUndefined();
+        });
+
         it('should include memberData when adminParticipant is provided', async () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
             const adminEmail = 'admin@example.com';
             const adminAccountID = 999;
 
             // When creating a workspace with an adminParticipant
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1316,20 +1600,22 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
-                adminParticipant: {login: adminEmail, accountID: adminAccountID},
+                activePolicy: undefined,
+                adminParticipant: {participant: {login: adminEmail, accountID: adminAccountID}, doesPersonalDetailExist: true},
             });
             await waitForBatchedUpdates();
 
             // Then API.write should be called with CREATE_WORKSPACE command
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
             expect(apiCallArgs).toBeDefined();
-            const params = apiCallArgs?.[1] as {memberData?: string; policyID?: string};
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
             expect(params.policyID).toBe(policyID);
             expect(params.memberData).toBeDefined();
-            const memberData = JSON.parse(params.memberData ?? '{}') as {accountID: number; email: string; role: string};
+            const memberData = parseJSONRecord(params.memberData);
             expect(memberData.accountID).toBe(adminAccountID);
             expect(memberData.email).toBe(adminEmail);
             expect(memberData.role).toBe(CONST.POLICY.ROLE.ADMIN);
@@ -1341,12 +1627,13 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
             const createWorkspaceTaskReportID = 'testTaskReportID123';
 
             // When creating a workspace with TEST_DRIVE_RECEIVER choice and createWorkspace task
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1355,9 +1642,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.TEST_DRIVE_RECEIVER, createWorkspace: createWorkspaceTaskReportID},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -1373,8 +1662,176 @@ describe('actions/Policy', () => {
             apiWriteSpy.mockRestore();
         });
 
+        // The guard in buildPolicyData decides whether to attach onboarding tasks (guidedSetupData)
+        // to the new workspace. Users who already finished a Concierge-based onboarding flow
+        // (TRACK_WORKSPACE / EMPLOYER / SUBMIT / CHAT_SPLIT / LOOKING_AROUND / PERSONAL_SPEND)
+        // never have introSelected.createWorkspace set, so the previous `!introSelected?.createWorkspace`
+        // check evaluated truthy and leaked the tasks into the new workspace's #admins room.
+        // The fix swaps that for `!introSelected?.choice`, which is populated by every completeOnboarding call.
+        const onboardedChoices = [
+            CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE,
+            CONST.ONBOARDING_CHOICES.EMPLOYER,
+            CONST.ONBOARDING_CHOICES.SUBMIT,
+            CONST.ONBOARDING_CHOICES.CHAT_SPLIT,
+            CONST.ONBOARDING_CHOICES.LOOKING_AROUND,
+            CONST.ONBOARDING_CHOICES.PERSONAL_SPEND,
+            CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+        ] as const;
+
+        it.each(onboardedChoices)('should not add onboarding tasks when user already completed onboarding (choice=%s)', async (choice) => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await waitForBatchedUpdates();
+
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            const policyID = Policy.generatePolicyID();
+
+            // When creating a workspace and the user has already completed a guided onboarding flow,
+            // introSelected.choice is populated but introSelected.createWorkspace is not (Concierge-based flows
+            // never set it; MANAGE_TEAM only sets it for the *first* workspace, not subsequent ones).
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+                introSelected: {choice},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            // Then guidedSetupData should NOT be sent, so the #admins room of the new workspace stays empty of onboarding tasks.
+            const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
+            expect(apiCallArgs).toBeDefined();
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
+            expect(params.guidedSetupData).toBeUndefined();
+
+            apiWriteSpy.mockRestore();
+        });
+
+        it('should add onboarding tasks when the user has not yet selected an onboarding choice', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await waitForBatchedUpdates();
+
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            const policyID = Policy.generatePolicyID();
+
+            // When creating a workspace before the user has gone through guided onboarding (introSelected.choice is undefined),
+            // the block should run so that onboarding tasks are attached to the new workspace.
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+                introSelected: {},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            // Then guidedSetupData should be sent.
+            const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
+            expect(apiCallArgs).toBeDefined();
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
+            expect(params.guidedSetupData).toBeDefined();
+
+            apiWriteSpy.mockRestore();
+        });
+
+        it('should add onboarding tasks for TEST_DRIVE_RECEIVER even when choice is set', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await waitForBatchedUpdates();
+
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            const policyID = Policy.generatePolicyID();
+
+            // Even when introSelected.choice is populated, TEST_DRIVE_RECEIVER must still enter the block via
+            // the first disjunct so that the downstream Concierge createWorkspace task gets completed.
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.TEST_DRIVE_RECEIVER},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
+            expect(apiCallArgs).toBeDefined();
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
+            expect(params.guidedSetupData).toBeDefined();
+
+            apiWriteSpy.mockRestore();
+        });
+
+        it('should bail out of onboarding-tasks block if prepareOnboardingOnyxData returns undefined', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await waitForBatchedUpdates();
+
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            // Force prepareOnboardingOnyxData to return undefined so the early-return path inside the guarded block runs.
+            // This mirrors the real-world case where the target chat (Concierge for non-MANAGE_TEAM flows) cannot be resolved.
+            const prepareSpy = jest.spyOn(ReportUtils, 'prepareOnboardingOnyxData').mockReturnValue(undefined);
+            const policyID = Policy.generatePolicyID();
+
+            // introSelected.choice is undefined so the block enters; engagementChoice is non-MANAGE_TEAM
+            // so prepareOnboardingOnyxData would normally route to Concierge — and since the mock returns undefined,
+            // buildPolicyData should return early without setting guidedSetupData.
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                engagementChoice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE,
+                introSelected: {},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            expect(prepareSpy).toHaveBeenCalled();
+            const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
+            expect(apiCallArgs).toBeDefined();
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
+            // Early-return path should not populate the onboarding fields.
+            expect(params.guidedSetupData).toBeUndefined();
+            expect(params.bespokeWelcomeMessage).toBeUndefined();
+
+            prepareSpy.mockRestore();
+            apiWriteSpy.mockRestore();
+        });
+
         it('should publish a workspace created event if this is their first policy', () => {
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1383,17 +1840,20 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
 
             expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
-            expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED, ESH_ACCOUNT_ID);
+            expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED.NAME, ESH_ACCOUNT_ID, ESH_EMAIL);
         });
 
         it('should not publish a workspace created event if this is not their first policy', () => {
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1402,9 +1862,11 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: true,
+                activePolicy: undefined,
             });
 
             expect(GoogleTagManager.publishEvent).not.toHaveBeenCalled();
@@ -1414,10 +1876,11 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1425,15 +1888,17 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
             expect(apiCallArgs).toBeDefined();
-            const params = apiCallArgs?.[1] as {memberData?: string};
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
             expect(params.memberData).toBeUndefined();
 
             apiWriteSpy.mockRestore();
@@ -1443,12 +1908,13 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
             const adminEmail = 'admin@example.com';
             const adminAccountID = 555;
 
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: WORKSPACE_NAME,
@@ -1456,23 +1922,27 @@ describe('actions/Policy', () => {
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
-                adminParticipant: {login: adminEmail, accountID: adminAccountID},
+                adminParticipant: {participant: {login: adminEmail, accountID: adminAccountID}, doesPersonalDetailExist: true},
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             // Verify memberData contains the workspaceChatReportID (created by createPolicyExpenseChats)
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
-            const params = apiCallArgs?.[1] as {memberData?: string};
-            const memberData = JSON.parse(params.memberData ?? '{}') as {workspaceChatReportID: string; workspaceChatCreatedReportActionID: string};
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
+            const memberData = parseJSONRecord(params.memberData);
             expect(memberData.workspaceChatReportID).toBeTruthy();
             expect(memberData.workspaceChatCreatedReportActionID).toBeTruthy();
 
             // Verify that optimistic data includes the expense chat report
-            const onyxData = apiCallArgs?.[2] as {optimisticData?: Array<{key: string; value: unknown}>};
-            const expenseChatOptimisticData = onyxData.optimisticData?.find((data) => data.key === `${ONYXKEYS.COLLECTION.REPORT}${memberData.workspaceChatReportID}`);
+            const onyxData = requireRecord(requireCallArgument(apiCallArgs, 2));
+            const expenseChatOptimisticData = requireRecordArrayProperty(onyxData, 'optimisticData').find(
+                (data) => data.key === `${ONYXKEYS.COLLECTION.REPORT}${requireStringProperty(memberData, 'workspaceChatReportID')}`,
+            );
             expect(expenseChatOptimisticData).toBeTruthy();
 
             apiWriteSpy.mockRestore();
@@ -1482,36 +1952,42 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const adminEmail = 'admin@example.com';
             const adminAccountID = 555;
 
             // Create two workspaces with the same adminParticipant — each should get a unique expense chat
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: 'Workspace 1',
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
-                adminParticipant: {login: adminEmail, accountID: adminAccountID},
+                adminParticipant: {participant: {login: adminEmail, accountID: adminAccountID}, doesPersonalDetailExist: true},
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
             Policy.createWorkspace({
+                conciergeChat: undefined,
                 policyOwnerEmail: ESH_EMAIL,
                 makeMeAdmin: true,
                 policyName: 'Workspace 2',
                 introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
                 currentUserAccountIDParam: ESH_ACCOUNT_ID,
                 currentUserEmailParam: ESH_EMAIL,
+                currency: undefined,
                 isSelfTourViewed: false,
                 betas: undefined,
                 hasActiveAdminPolicies: false,
-                adminParticipant: {login: adminEmail, accountID: adminAccountID},
+                adminParticipant: {participant: {login: adminEmail, accountID: adminAccountID}, doesPersonalDetailExist: true},
+                activePolicy: undefined,
             });
             await waitForBatchedUpdates();
 
@@ -1519,13 +1995,47 @@ describe('actions/Policy', () => {
             const calls = apiWriteSpy.mock.calls.filter((call) => call.at(0) === WRITE_COMMANDS.CREATE_WORKSPACE);
             expect(calls).toHaveLength(2);
 
-            const memberData1 = JSON.parse((calls.at(0)?.at(1) as {memberData: string}).memberData) as {workspaceChatReportID: string};
-            const memberData2 = JSON.parse((calls.at(1)?.at(1) as {memberData: string}).memberData) as {workspaceChatReportID: string};
+            const memberData1 = parseJSONRecord(readProperty(requireCallArgument(calls.at(0), 1), 'memberData'));
+            const memberData2 = parseJSONRecord(readProperty(requireCallArgument(calls.at(1), 1), 'memberData'));
             expect(memberData1.workspaceChatReportID).toBeTruthy();
             expect(memberData2.workspaceChatReportID).toBeTruthy();
             expect(memberData1.workspaceChatReportID).not.toBe(memberData2.workspaceChatReportID);
 
             apiWriteSpy.mockRestore();
+        });
+
+        it('should use the explicit currency argument and not fall back to the deprecated session user localCurrencyCode', async () => {
+            // Set Onyx session + personal details so localCurrencyCode would be EUR if the fallback were used
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await Onyx.set(ONYXKEYS.PERSONAL_DETAILS_LIST, {
+                [ESH_ACCOUNT_ID]: {accountID: ESH_ACCOUNT_ID, login: ESH_EMAIL, localCurrencyCode: CONST.CURRENCY.EUR},
+            });
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+            // Pass explicit GBP currency — this should win over the session user's EUR localCurrencyCode
+            Policy.createWorkspace({
+                conciergeChat: undefined,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
+                policyName: WORKSPACE_NAME,
+                policyID,
+                currency: 'GBP',
+                engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                currentUserAccountIDParam: ESH_ACCOUNT_ID,
+                currentUserEmailParam: ESH_EMAIL,
+                isSelfTourViewed: false,
+                betas: undefined,
+                hasActiveAdminPolicies: false,
+                activePolicy: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            const policy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`);
+
+            expect(policy?.outputCurrency).toBe('GBP');
+            expect(policy?.outputCurrency).not.toBe(CONST.CURRENCY.EUR);
         });
     });
 
@@ -1540,11 +2050,11 @@ describe('actions/Policy', () => {
             mockFetch.pause();
 
             // When setting the workspace avatar
-            const file = {
+            const file = createMock<File>({
                 uri: 'file://path/to/avatar.png',
                 name: 'avatar.png',
                 type: 'image/png',
-            } as File;
+            });
             Policy.updateWorkspaceAvatar(policy.id, '', file);
 
             // Then optimistic data should be set in Onyx
@@ -1573,11 +2083,11 @@ describe('actions/Policy', () => {
 
             // When updating the workspace avatar but fail
             mockFetch.fail();
-            const file = {
+            const file = createMock<File>({
                 uri: 'file://path/to/avatar.png',
                 name: 'avatar.png',
                 type: 'image/png',
-            } as File;
+            });
             Policy.updateWorkspaceAvatar(policy.id, policy.avatarURL, file);
             await waitForBatchedUpdates();
 
@@ -1792,7 +2302,7 @@ describe('actions/Policy', () => {
 
     describe('updateAddress', () => {
         it('should send discrete address fields with UPDATE_POLICY_ADDRESS', async () => {
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
             Policy.updateAddress(policyID, {
@@ -1808,7 +2318,7 @@ describe('actions/Policy', () => {
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.UPDATE_POLICY_ADDRESS);
             expect(apiCallArgs).toBeDefined();
 
-            const params = apiCallArgs?.[1] as Record<string, string>;
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
             expect(params).toEqual(
                 expect.objectContaining({
                     policyID,
@@ -1830,7 +2340,7 @@ describe('actions/Policy', () => {
         });
 
         it('should send an empty second line when addressStreet2 is missing', async () => {
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const policyID = Policy.generatePolicyID();
 
             Policy.updateAddress(policyID, {
@@ -1845,7 +2355,7 @@ describe('actions/Policy', () => {
             const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.UPDATE_POLICY_ADDRESS);
             expect(apiCallArgs).toBeDefined();
 
-            const params = apiCallArgs?.[1] as Record<string, string>;
+            const params = requireRecord(requireCallArgument(apiCallArgs, 1));
             expect(params.addressStreet2).toBe('');
 
             apiWriteSpy.mockRestore();
@@ -2062,7 +2572,7 @@ describe('actions/Policy', () => {
             const nonOwnedWorkspaceChats = [nonOwnedWorkspaceChat1, nonOwnedWorkspaceChat2];
 
             const getAllWorkspaceReportsSpy = jest.spyOn(ReportUtils, 'getAllWorkspaceReports').mockReturnValue([ownWorkspaceChat, ...nonOwnedWorkspaceChats]);
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
 
             Policy.leaveWorkspace(ESH_ACCOUNT_ID, ESH_EMAIL, policy);
             await waitForBatchedUpdates();
@@ -2076,11 +2586,7 @@ describe('actions/Policy', () => {
                 expect.anything(),
             );
 
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as {
-                optimisticData?: Array<{key?: string; value?: Record<string, unknown> | null}>;
-                successData?: Array<{key?: string; value?: Record<string, unknown> | null}>;
-                failureData?: Array<{key?: string; value?: Record<string, unknown> | null}>;
-            };
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
 
             expect(writeOptions?.optimisticData).toEqual(
                 expect.arrayContaining(
@@ -2102,7 +2608,9 @@ describe('actions/Policy', () => {
                 ),
             );
 
-            const removedWorkspaceChatUpdates = (writeOptions?.optimisticData ?? []).filter((update) => (update.value as {reportID?: string | null} | undefined)?.reportID === null);
+            const removedWorkspaceChatUpdates = requireRecordArrayProperty(writeOptions, 'optimisticData').filter(
+                (update) => readProperty(readProperty(update, 'value'), 'reportID') === null,
+            );
             expect(removedWorkspaceChatUpdates).toHaveLength(nonOwnedWorkspaceChats.length);
 
             expect(writeOptions?.optimisticData).not.toEqual(
@@ -2116,16 +2624,11 @@ describe('actions/Policy', () => {
                 ]),
             );
 
-            expect(writeOptions?.optimisticData).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({
-                        key: `${ONYXKEYS.COLLECTION.REPORT_NAME_VALUE_PAIRS}${ownWorkspaceChat.reportID}`,
-                        value: expect.objectContaining({
-                            private_isArchived: expect.any(String) as unknown as string,
-                        }),
-                    }),
-                ]),
+            const archivedWorkspaceChatUpdate = requireRecordArrayProperty(writeOptions, 'optimisticData').find(
+                (update) => requireStringProperty(update, 'key') === `${ONYXKEYS.COLLECTION.REPORT_NAME_VALUE_PAIRS}${ownWorkspaceChat.reportID}`,
             );
+            expect(archivedWorkspaceChatUpdate).toBeDefined();
+            expect(typeof readProperty(readProperty(archivedWorkspaceChatUpdate, 'value'), 'private_isArchived')).toBe('string');
 
             expect(writeOptions?.successData).toEqual(
                 expect.arrayContaining(
@@ -2175,7 +2678,7 @@ describe('actions/Policy', () => {
             };
 
             const getAllWorkspaceReportsSpy = jest.spyOn(ReportUtils, 'getAllWorkspaceReports').mockReturnValue([workspaceChat]);
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
 
             const customAccountID = 999;
             const customEmail = 'custom@example.com';
@@ -2183,13 +2686,13 @@ describe('actions/Policy', () => {
             Policy.leaveWorkspace(customAccountID, customEmail, policy);
             await waitForBatchedUpdates();
 
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as {
-                optimisticData?: Array<{key?: string; value?: Record<string, unknown> | null}>;
-            };
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
 
             // Verify pendingChatMembers uses the explicit customAccountID, not the Onyx session accountID
-            const metadataUpdate = (writeOptions?.optimisticData ?? []).find((update) => (update.key ?? '').startsWith(ONYXKEYS.COLLECTION.REPORT_METADATA));
-            const pendingMembers = (metadataUpdate?.value as {pendingChatMembers?: Array<{accountID: string}>})?.pendingChatMembers ?? [];
+            const metadataUpdate = requireRecordArrayProperty(writeOptions, 'optimisticData').find((update) =>
+                requireStringProperty(update, 'key').startsWith(ONYXKEYS.COLLECTION.REPORT_METADATA),
+            );
+            const pendingMembers = requireRecordArrayProperty(readProperty(metadataUpdate, 'value'), 'pendingChatMembers');
 
             expect(pendingMembers).toEqual(
                 expect.arrayContaining([
@@ -2200,7 +2703,7 @@ describe('actions/Policy', () => {
             );
 
             // Verify that the Onyx session accountID is NOT used
-            const usesOnyxSessionAccountID = pendingMembers.some((member) => member.accountID === String(ESH_ACCOUNT_ID));
+            const usesOnyxSessionAccountID = pendingMembers.some((member) => requireStringProperty(member, 'accountID') === String(ESH_ACCOUNT_ID));
             expect(usesOnyxSessionAccountID).toBe(false);
 
             apiWriteSpy.mockRestore();
@@ -2215,7 +2718,15 @@ describe('actions/Policy', () => {
 
             const policyID = Policy.generatePolicyID();
 
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, CONST.CURRENCY.EUR);
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: CONST.CURRENCY.EUR,
+                policyID,
+                makeMeAdmin: false,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2235,7 +2746,14 @@ describe('actions/Policy', () => {
             const customEmail = 'custom@example.com';
             const policyID = Policy.generatePolicyID();
 
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, customAccountID, customEmail, policyID);
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: customAccountID,
+                currentUserEmail: customEmail,
+                currency: undefined,
+                policyID,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2257,7 +2775,14 @@ describe('actions/Policy', () => {
             const customEmail = 'approver@example.com';
             const policyID = Policy.generatePolicyID();
 
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, customAccountID, customEmail, policyID);
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: customAccountID,
+                currentUserEmail: customEmail,
+                currency: undefined,
+                policyID,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2274,7 +2799,14 @@ describe('actions/Policy', () => {
             const customEmail = 'employee@example.com';
             const policyID = Policy.generatePolicyID();
 
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, customAccountID, customEmail, policyID);
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: customAccountID,
+                currentUserEmail: customEmail,
+                currency: undefined,
+                policyID,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2296,16 +2828,16 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            const params = Policy.createDraftWorkspace(
-                {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
-                WORKSPACE_NAME,
-                ESH_ACCOUNT_ID,
-                ESH_EMAIL,
-                ESH_EMAIL,
-                true,
+            const params = Policy.createDraftWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                policyOwnerEmail: ESH_EMAIL,
+                makeMeAdmin: true,
                 policyID,
-                CONST.CURRENCY.USD,
-            );
+                currency: CONST.CURRENCY.USD,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2333,7 +2865,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftWorkspace({choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, ESH_EMAIL, false, policyID, CONST.CURRENCY.EUR);
+            Policy.createDraftWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.TRACK_WORKSPACE},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                policyOwnerEmail: ESH_EMAIL,
+                policyID,
+                currency: CONST.CURRENCY.EUR,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2354,7 +2894,15 @@ describe('actions/Policy', () => {
             const customEmail = 'custom@example.com';
             const policyID = Policy.generatePolicyID();
 
-            Policy.createDraftWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, customAccountID, customEmail, customEmail, false, policyID);
+            Policy.createDraftWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: customAccountID,
+                currentUserEmail: customEmail,
+                policyOwnerEmail: customEmail,
+                policyID,
+                currency: undefined,
+            });
             await waitForBatchedUpdates();
 
             const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -2374,6 +2922,33 @@ describe('actions/Policy', () => {
             expect(draft?.owner).not.toBe(ESH_EMAIL);
             expect(draft?.ownerAccountID).not.toBe(ESH_ACCOUNT_ID);
             expect(draft?.employeeList?.[ESH_EMAIL]).toBeUndefined();
+        });
+
+        it('should use the explicit currency argument and not fall back to the deprecated session user localCurrencyCode', async () => {
+            // Set Onyx session + personal details so localCurrencyCode would be EUR if the fallback were used
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await Onyx.set(ONYXKEYS.PERSONAL_DETAILS_LIST, {
+                [ESH_ACCOUNT_ID]: {accountID: ESH_ACCOUNT_ID, login: ESH_EMAIL, localCurrencyCode: CONST.CURRENCY.EUR},
+            });
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+            // Pass explicit GBP currency — this should win over the session user's EUR localCurrencyCode
+            Policy.createDraftWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                policyOwnerEmail: ESH_EMAIL,
+                policyID,
+                currency: 'GBP',
+            });
+            await waitForBatchedUpdates();
+
+            const draft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
+
+            expect(draft?.outputCurrency).toBe('GBP');
+            expect(draft?.outputCurrency).not.toBe(CONST.CURRENCY.EUR);
         });
     });
 
@@ -2460,6 +3035,147 @@ describe('actions/Policy', () => {
 
             expect(policy?.eReceipts).toBe(fakePolicy.eReceipts);
         });
+
+        it('upgradeToCorporate should optimistically set receipt defaults but not max expense age/amount', async () => {
+            // Given a Collect policy with expense limits disabled (empty in Rules UI)
+            const fakePolicy: PolicyType = {
+                ...createRandomPolicy(0, CONST.POLICY.TYPE.TEAM),
+                maxExpenseAge: CONST.DISABLED_MAX_EXPENSE_VALUE,
+                maxExpenseAmount: CONST.DISABLED_MAX_EXPENSE_VALUE,
+                maxExpenseAmountNoReceipt: CONST.DISABLED_MAX_EXPENSE_VALUE,
+                maxExpenseAmountNoItemizedReceipt: CONST.DISABLED_MAX_EXPENSE_VALUE,
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+
+            // When upgrading to corporate
+            Policy.upgradeToCorporate(fakePolicy);
+            await waitForBatchedUpdates();
+
+            const policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
+                const connection = Onyx.connect({
+                    key: `${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`,
+                    callback: (workspace) => {
+                        Onyx.disconnect(connection);
+                        resolve(workspace);
+                    },
+                });
+            });
+
+            // Then age/amount stay disabled (API leaves them empty — avoids #74401 flash),
+            // while receipt thresholds get Control defaults (matches post-upgrade Rules UI).
+            expect(policy?.maxExpenseAge).toBe(CONST.DISABLED_MAX_EXPENSE_VALUE);
+            expect(policy?.maxExpenseAmount).toBe(CONST.DISABLED_MAX_EXPENSE_VALUE);
+            expect(policy?.maxExpenseAmountNoReceipt).toBe(CONST.POLICY.DEFAULT_MAX_AMOUNT_NO_RECEIPT);
+            expect(policy?.maxExpenseAmountNoItemizedReceipt).toBe(CONST.POLICY.DEFAULT_MAX_AMOUNT_NO_ITEMIZED_RECEIPT);
+            expect(policy?.type).toBe(CONST.POLICY.TYPE.CORPORATE);
+        });
+    });
+
+    describe('upgradeSubmit', () => {
+        afterEach(() => {
+            mockFetch?.resume?.();
+        });
+
+        it('should upgrade to team optimistically and clear pending state on success', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+
+            const fakePolicy: PolicyType = {
+                ...createRandomPolicy(0, CONST.POLICY.TYPE.SUBMIT),
+                owner: TEST_EMAIL,
+                ownerAccountID: 999,
+                canDowngrade: true,
+                areCompanyCardsEnabled: false,
+                employeeList: {
+                    [ESH_EMAIL]: {email: ESH_EMAIL, role: CONST.POLICY.ROLE.EDITOR},
+                    [EMPLOYEE_EMAIL]: {email: EMPLOYEE_EMAIL, role: CONST.POLICY.ROLE.USER},
+                },
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+            await waitForBatchedUpdates();
+
+            mockFetch.pause();
+            Policy.upgradeSubmit(fakePolicy, CONST.POLICY.TYPE.TEAM, ESH_EMAIL, ESH_ACCOUNT_ID, undefined, undefined);
+            await waitForBatchedUpdates();
+
+            let updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`);
+            expect(updatedPolicy?.type).toBe(CONST.POLICY.TYPE.TEAM);
+            expect(updatedPolicy?.isPendingUpgrade).toBe(true);
+            expect(updatedPolicy?.canDowngrade).toBe(false);
+            expect(updatedPolicy?.areCompanyCardsEnabled).toBe(true);
+            expect(updatedPolicy?.owner).toBe(ESH_EMAIL);
+            expect(updatedPolicy?.ownerAccountID).toBe(ESH_ACCOUNT_ID);
+            expect(updatedPolicy?.role).toBe(CONST.POLICY.ROLE.ADMIN);
+            expect(updatedPolicy?.employeeList?.[ESH_EMAIL]?.role).toBe(CONST.POLICY.ROLE.ADMIN);
+            expect(updatedPolicy?.employeeList?.[EMPLOYEE_EMAIL]?.role).toBe(CONST.POLICY.ROLE.USER);
+
+            const firstDayFreeTrial = await getOnyxValue(ONYXKEYS.NVP_FIRST_DAY_FREE_TRIAL);
+            const lastDayFreeTrial = await getOnyxValue(ONYXKEYS.NVP_LAST_DAY_FREE_TRIAL);
+            expect(firstDayFreeTrial).toBeTruthy();
+            expect(lastDayFreeTrial).toBeTruthy();
+
+            await mockFetch.resume();
+
+            updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`);
+            expect(updatedPolicy?.isPendingUpgrade).toBe(false);
+        });
+
+        it('should apply corporate upgrade fields when upgrading to corporate', async () => {
+            const fakePolicy: PolicyType = {
+                ...createRandomPolicy(0, CONST.POLICY.TYPE.SUBMIT),
+                outputCurrency: CONST.CURRENCY.USD,
+                eReceipts: false,
+                autoReporting: true,
+                autoReportingFrequency: CONST.POLICY.AUTO_REPORTING_FREQUENCIES.INSTANT,
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+            await waitForBatchedUpdates();
+
+            mockFetch.pause();
+            Policy.upgradeSubmit(fakePolicy, CONST.POLICY.TYPE.CORPORATE, ESH_EMAIL, ESH_ACCOUNT_ID, undefined, undefined);
+            await waitForBatchedUpdates();
+
+            const updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`);
+            expect(updatedPolicy?.type).toBe(CONST.POLICY.TYPE.CORPORATE);
+            expect(updatedPolicy?.eReceipts).toBe(true);
+            expect(updatedPolicy?.autoReporting).toBe(true);
+            expect(updatedPolicy?.autoReportingFrequency).toBe(CONST.POLICY.AUTO_REPORTING_FREQUENCIES.INSTANT);
+        });
+
+        it('should revert upgrade and free trial NVPs when the request fails', async () => {
+            const fakePolicy: PolicyType = {
+                ...createRandomPolicy(0, CONST.POLICY.TYPE.SUBMIT),
+                canDowngrade: true,
+                areCompanyCardsEnabled: false,
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+            await Onyx.set(ONYXKEYS.NVP_FIRST_DAY_FREE_TRIAL, 'prior-first-day');
+            await Onyx.set(ONYXKEYS.NVP_LAST_DAY_FREE_TRIAL, 'prior-last-day');
+            await waitForBatchedUpdates();
+
+            mockFetch.fail();
+            Policy.upgradeSubmit(fakePolicy, CONST.POLICY.TYPE.TEAM, ESH_EMAIL, ESH_ACCOUNT_ID, 'prior-first-day', 'prior-last-day');
+            await waitForBatchedUpdates();
+
+            const updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`);
+            expect(updatedPolicy?.type).toBe(CONST.POLICY.TYPE.SUBMIT);
+            expect(updatedPolicy?.isPendingUpgrade).toBe(false);
+            expect(updatedPolicy?.canDowngrade).toBe(true);
+            expect(updatedPolicy?.areCompanyCardsEnabled).toBe(false);
+
+            expect(await getOnyxValue(ONYXKEYS.NVP_FIRST_DAY_FREE_TRIAL)).toBe('prior-first-day');
+            expect(await getOnyxValue(ONYXKEYS.NVP_LAST_DAY_FREE_TRIAL)).toBe('prior-last-day');
+        });
+
+        it('should not call API when policy is undefined', async () => {
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+
+            Policy.upgradeSubmit(undefined, CONST.POLICY.TYPE.TEAM, ESH_EMAIL, ESH_ACCOUNT_ID, undefined, undefined);
+            await waitForBatchedUpdates();
+
+            expect(apiWriteSpy).not.toHaveBeenCalled();
+
+            apiWriteSpy.mockRestore();
+        });
     });
 
     describe('downgradeToTeam', () => {
@@ -2516,8 +3232,33 @@ describe('actions/Policy', () => {
     });
 
     describe('enablePolicyRules', () => {
+        it('should not auto-enable billable tracking when policy rules are enabled', async () => {
+            mockFetch.pause();
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            const fakePolicy: PolicyType = {
+                ...createRandomPolicy(0, CONST.POLICY.TYPE.TEAM),
+                areRulesEnabled: false,
+                disabledFields: {
+                    defaultBillable: true,
+                    reimbursable: false,
+                },
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+            await waitForBatchedUpdates();
+
+            Policy.enablePolicyRules(fakePolicy, true);
+            await waitForBatchedUpdates();
+
+            const policy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`);
+            expect(policy?.areRulesEnabled).toBe(true);
+            expect(policy?.disabledFields?.defaultBillable).toBe(true);
+            expect(policy?.disabledFields?.reimbursable).toBe(false);
+
+            await mockFetch.resume();
+        });
+
         it('should not reset preventSelfApproval when the rule feature is turned off', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             const fakePolicy: PolicyType = {
                 ...createRandomPolicy(0, CONST.POLICY.TYPE.TEAM),
@@ -2546,7 +3287,7 @@ describe('actions/Policy', () => {
             expect(policy?.areRulesEnabled).toBeFalsy();
             expect(policy?.pendingFields?.areRulesEnabled).toEqual(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
@@ -2566,7 +3307,7 @@ describe('actions/Policy', () => {
 
     describe('setWorkspaceApprovalMode', () => {
         it('should not change employee list when disabling approval', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
 
             const policyID = Policy.generatePolicyID();
@@ -2594,7 +3335,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             let policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -2611,7 +3352,7 @@ describe('actions/Policy', () => {
             expect(policy?.employeeList).toEqual(employeeList);
             expect(policy?.pendingFields?.approvalMode).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
@@ -2633,11 +3374,9 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
-            const buildNextStepNewSpy = jest
-                .spyOn(require('@libs/NextStepUtils'), 'buildNextStepNew')
-                // eslint-disable-next-line @typescript-eslint/no-deprecated -- This test covers legacy NextStep optimistic updates which still use the deprecated type.
-                .mockReturnValue({type: 'neutral', icon: CONST.NEXT_STEP.ICONS.CHECKMARK, message: [{text: 'Mock next step'}]} as never);
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            const optimisticNextStep = createMock<ReportNextStep>({messageKey: CONST.NEXT_STEP.MESSAGE_KEY.NO_FURTHER_ACTION, icon: CONST.NEXT_STEP.ICONS.CHECKMARK});
+            const buildNextStepNewSpy = jest.spyOn(require('@libs/NextStepUtils'), 'buildOptimisticNextStep').mockReturnValue(optimisticNextStep);
 
             const getAllPolicyReportsSpy = jest.spyOn(ReportUtils, 'getAllPolicyReports');
             const isExpenseReportSpy = jest.spyOn(ReportUtils, 'isExpenseReport');
@@ -2654,26 +3393,19 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            const submittedExpenseReport1 = {reportID: '100', policyID, statusNum: CONST.REPORT.STATUS_NUM.SUBMITTED} as unknown as Report;
-            const submittedExpenseReport2 = {reportID: '101', policyID, statusNum: CONST.REPORT.STATUS_NUM.SUBMITTED} as unknown as Report;
+            const submittedExpenseReport1 = createMock<Report>({reportID: '100', policyID, statusNum: CONST.REPORT.STATUS_NUM.SUBMITTED});
+            const submittedExpenseReport2 = createMock<Report>({reportID: '101', policyID, statusNum: CONST.REPORT.STATUS_NUM.SUBMITTED});
             getAllPolicyReportsSpy.mockReturnValue([submittedExpenseReport1, submittedExpenseReport2]);
             isExpenseReportSpy.mockReturnValue(true);
             hasViolationsSpy.mockReturnValue(false);
 
-            const nextStepKey1 = `${ONYXKEYS.COLLECTION.NEXT_STEP}${submittedExpenseReport1.reportID}` as const;
-            const nextStepKey2 = `${ONYXKEYS.COLLECTION.NEXT_STEP}${submittedExpenseReport2.reportID}` as const;
-            // eslint-disable-next-line @typescript-eslint/no-deprecated -- We need a minimal ReportNextStepDeprecated shape to simulate rollback on failure.
-            const currentNextStep1 = {type: 'neutral', icon: CONST.NEXT_STEP.ICONS.CHECKMARK, message: [{text: 'Old next step 1'}]} as never;
-            // eslint-disable-next-line @typescript-eslint/no-deprecated -- We need a minimal ReportNextStepDeprecated shape to simulate rollback on failure.
-            const currentNextStep2 = {type: 'neutral', icon: CONST.NEXT_STEP.ICONS.CHECKMARK, message: [{text: 'Old next step 2'}]} as never;
+            const reportKey1 = `${ONYXKEYS.COLLECTION.REPORT}${submittedExpenseReport1.reportID}` as const;
+            const reportKey2 = `${ONYXKEYS.COLLECTION.REPORT}${submittedExpenseReport2.reportID}` as const;
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, {
-                reportNextSteps: {
-                    [nextStepKey1]: currentNextStep1,
-                    [nextStepKey2]: currentNextStep2,
-                },
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false, {
                 transactionViolations: {},
                 betas: [],
+                personalDetailsList: {},
             });
             await waitForBatchedUpdates();
 
@@ -2682,12 +3414,16 @@ describe('actions/Policy', () => {
                 expect.anything(),
                 expect.objectContaining({
                     optimisticData: expect.arrayContaining([
-                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: nextStepKey1}),
-                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: nextStepKey2}),
+                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: reportKey1, value: {nextStep: optimisticNextStep, pendingFields: {nextStep: 'update'}}}),
+                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: reportKey2, value: {nextStep: optimisticNextStep, pendingFields: {nextStep: 'update'}}}),
                     ]),
                     failureData: expect.arrayContaining([
-                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: nextStepKey1, value: currentNextStep1}),
-                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: nextStepKey2, value: currentNextStep2}),
+                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: reportKey1, value: {nextStep: null, pendingFields: {nextStep: null}}}),
+                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: reportKey2, value: {nextStep: null, pendingFields: {nextStep: null}}}),
+                    ]),
+                    successData: expect.arrayContaining([
+                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: reportKey1, value: {pendingFields: {nextStep: null}}}),
+                        expect.objectContaining({onyxMethod: Onyx.METHOD.MERGE, key: reportKey2, value: {pendingFields: {nextStep: null}}}),
                     ]),
                 }),
             );
@@ -2701,15 +3437,13 @@ describe('actions/Policy', () => {
             hasViolationsSpy.mockRestore();
         });
 
-        it('should pass currentUserAccountID and currentUserEmail to hasViolations and buildNextStepNew', async () => {
+        it('should pass currentUserAccountID and currentUserEmail to hasViolations and buildOptimisticNextStep', async () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
-            const buildNextStepNewSpy = jest
-                .spyOn(require('@libs/NextStepUtils'), 'buildNextStepNew')
-                // eslint-disable-next-line @typescript-eslint/no-deprecated -- This test covers legacy NextStep optimistic updates which still use the deprecated type.
-                .mockReturnValue({type: 'neutral', icon: CONST.NEXT_STEP.ICONS.CHECKMARK, message: [{text: 'Mock next step'}]} as never);
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            const optimisticNextStep = createMock<ReportNextStep>({messageKey: CONST.NEXT_STEP.MESSAGE_KEY.NO_FURTHER_ACTION, icon: CONST.NEXT_STEP.ICONS.CHECKMARK});
+            const buildNextStepNewSpy = jest.spyOn(require('@libs/NextStepUtils'), 'buildOptimisticNextStep').mockReturnValue(optimisticNextStep);
 
             const getAllPolicyReportsSpy = jest.spyOn(ReportUtils, 'getAllPolicyReports');
             const isExpenseReportSpy = jest.spyOn(ReportUtils, 'isExpenseReport');
@@ -2726,23 +3460,17 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            const submittedReport = {reportID: '200', policyID, statusNum: CONST.REPORT.STATUS_NUM.SUBMITTED} as unknown as Report;
+            const submittedReport = createMock<Report>({reportID: '200', policyID, statusNum: CONST.REPORT.STATUS_NUM.SUBMITTED});
             getAllPolicyReportsSpy.mockReturnValue([submittedReport]);
             isExpenseReportSpy.mockReturnValue(true);
 
             const customAccountID = 999;
             const customEmail = 'custom@example.com';
 
-            const nextStepKey = `${ONYXKEYS.COLLECTION.NEXT_STEP}${submittedReport.reportID}` as const;
-            // eslint-disable-next-line @typescript-eslint/no-deprecated -- We need a minimal ReportNextStepDeprecated shape for the test.
-            const currentNextStep = {type: 'neutral', icon: CONST.NEXT_STEP.ICONS.CHECKMARK, message: [{text: 'Old next step'}]} as never;
-
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, customAccountID, customEmail, {
-                reportNextSteps: {
-                    [nextStepKey]: currentNextStep,
-                },
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, customAccountID, customEmail, false, {
                 transactionViolations: {},
                 betas: [],
+                personalDetailsList: {},
             });
             await waitForBatchedUpdates();
 
@@ -2755,10 +3483,11 @@ describe('actions/Policy', () => {
                 undefined,
                 undefined,
                 expect.anything(),
+                undefined,
                 expect.anything(),
             );
 
-            // Verify buildNextStepNew received the custom accountID and email
+            // Verify buildOptimisticNextStep received the custom accountID and email
             expect(buildNextStepNewSpy).toHaveBeenCalledWith(
                 expect.objectContaining({
                     currentUserAccountIDParam: customAccountID,
@@ -2777,8 +3506,8 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
-            const buildNextStepNewSpy = jest.spyOn(require('@libs/NextStepUtils'), 'buildNextStepNew');
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+            const buildNextStepNewSpy = jest.spyOn(require('@libs/NextStepUtils'), 'buildOptimisticNextStep');
             const getAllPolicyReportsSpy = jest.spyOn(ReportUtils, 'getAllPolicyReports');
 
             const policyID = Policy.generatePolicyID();
@@ -2792,16 +3521,17 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             expect(getAllPolicyReportsSpy).not.toHaveBeenCalled();
             expect(buildNextStepNewSpy).not.toHaveBeenCalled();
 
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as {optimisticData?: Array<{key?: string}>; failureData?: Array<{key?: string}>} | undefined;
-            expect(writeOptions).toBeTruthy();
-            expect((writeOptions?.optimisticData ?? []).some((u) => (u?.key ?? '').startsWith(ONYXKEYS.COLLECTION.NEXT_STEP))).toBe(false);
-            expect((writeOptions?.failureData ?? []).some((u) => (u?.key ?? '').startsWith(ONYXKEYS.COLLECTION.NEXT_STEP))).toBe(false);
+            const apiCallArgs = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.DISABLE_POLICY_APPROVALS);
+            expect(apiCallArgs).toBeTruthy();
+            const writeOptions = requireRecord(requireCallArgument(apiCallArgs, 2), 'DISABLE_POLICY_APPROVALS write options');
+            expect(requireRecordArrayProperty(writeOptions, 'optimisticData').some((u) => requireStringProperty(u, 'key').startsWith(ONYXKEYS.COLLECTION.REPORT))).toBe(false);
+            expect(requireRecordArrayProperty(writeOptions, 'failureData').some((u) => requireStringProperty(u, 'key').startsWith(ONYXKEYS.COLLECTION.REPORT))).toBe(false);
 
             apiWriteSpy.mockRestore();
             buildNextStepNewSpy.mockRestore();
@@ -2809,7 +3539,7 @@ describe('actions/Policy', () => {
         });
 
         it('should optimistically clear forwardsTo and overLimitForwardsTo when switching to OPTIONAL mode', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
 
             const policyID = Policy.generatePolicyID();
@@ -2840,7 +3570,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             const policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -2867,14 +3597,14 @@ describe('actions/Policy', () => {
 
             expect(policy?.pendingFields?.approvalMode).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
         });
 
         it('should call DISABLE_POLICY_APPROVALS when switching to OPTIONAL mode', async () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
 
             const policyID = Policy.generatePolicyID();
             const fakePolicy: PolicyType = {
@@ -2887,7 +3617,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             expect(apiWriteSpy).toHaveBeenCalledWith(WRITE_COMMANDS.DISABLE_POLICY_APPROVALS, expect.objectContaining({policyID}), expect.anything());
@@ -2899,7 +3629,7 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
 
             const policyID = Policy.generatePolicyID();
             const fakePolicy: PolicyType = {
@@ -2912,7 +3642,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.BASIC, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.BASIC, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             expect(apiWriteSpy).toHaveBeenCalledWith(WRITE_COMMANDS.SET_WORKSPACE_APPROVAL_MODE, expect.objectContaining({policyID}), expect.anything());
@@ -2924,7 +3654,7 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
 
             const policyID = Policy.generatePolicyID();
             const employeeList = {
@@ -2954,13 +3684,15 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.BASIC, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.BASIC, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             // optimisticMembersState should be empty for non-OPTIONAL mode
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as {optimisticData?: Array<{key?: string; value?: Record<string, unknown>}>} | undefined;
-            const policyOptimisticData = writeOptions?.optimisticData?.find((u) => u?.key === `${ONYXKEYS.COLLECTION.POLICY}${policyID}`);
-            expect(policyOptimisticData?.value?.employeeList).toEqual({});
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
+            const policyOptimisticData = requireRecordArrayProperty(writeOptions, 'optimisticData').find(
+                (u) => requireStringProperty(u, 'key') === `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+            );
+            expect(readProperty(readProperty(policyOptimisticData, 'value'), 'employeeList')).toEqual({});
 
             apiWriteSpy.mockRestore();
         });
@@ -2999,7 +3731,7 @@ describe('actions/Policy', () => {
             // Simulate API failure
             mockFetch?.fail?.();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             const policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -3028,7 +3760,7 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const employeeWithNoForwarding = 'noforward@example.com';
 
             const policyID = Policy.generatePolicyID();
@@ -3056,21 +3788,20 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as
-                | {
-                      optimisticData?: Array<{key?: string; value?: {employeeList?: Record<string, unknown>}}>;
-                  }
-                | undefined;
-            const policyOptimisticData = writeOptions?.optimisticData?.find((u) => u?.key === `${ONYXKEYS.COLLECTION.POLICY}${policyID}`);
-            const optimisticEmployeeList = policyOptimisticData?.value?.employeeList as Record<string, Record<string, unknown>> | undefined;
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
+            const policyOptimisticData = requireRecordArrayProperty(writeOptions, 'optimisticData').find(
+                (u) => requireStringProperty(u, 'key') === `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+            );
+            const optimisticEmployeeList = requireRecord(readProperty(readProperty(policyOptimisticData, 'value'), 'employeeList'));
+            const optimisticAdmin = requireRecord(optimisticEmployeeList[ESH_EMAIL], 'optimistic admin employee');
 
             // Employee with submitsTo and forwardsTo should be updated
-            expect(optimisticEmployeeList?.[ESH_EMAIL]).toBeDefined();
-            expect(optimisticEmployeeList?.[ESH_EMAIL]?.submitsTo).toBe(ESH_EMAIL);
-            expect(optimisticEmployeeList?.[ESH_EMAIL]?.forwardsTo).toBe('');
+            expect(optimisticAdmin).toBeDefined();
+            expect(optimisticAdmin.submitsTo).toBe(ESH_EMAIL);
+            expect(optimisticAdmin.forwardsTo).toBe('');
 
             // Employee with no forwarding fields should not be in the updates
             expect(optimisticEmployeeList?.[employeeWithNoForwarding]).toBeUndefined();
@@ -3082,7 +3813,7 @@ describe('actions/Policy', () => {
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const differentApprover = 'manager@example.com';
 
             const policyID = Policy.generatePolicyID();
@@ -3106,26 +3837,25 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as
-                | {
-                      optimisticData?: Array<{key?: string; value?: {employeeList?: Record<string, Record<string, unknown>>}}>;
-                  }
-                | undefined;
-            const policyOptimisticData = writeOptions?.optimisticData?.find((u) => u?.key === `${ONYXKEYS.COLLECTION.POLICY}${policyID}`);
-            const optimisticEmployeeList = policyOptimisticData?.value?.employeeList;
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
+            const policyOptimisticData = requireRecordArrayProperty(writeOptions, 'optimisticData').find(
+                (u) => requireStringProperty(u, 'key') === `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+            );
+            const optimisticEmployeeList = requireRecord(readProperty(readProperty(policyOptimisticData, 'value'), 'employeeList'));
+            const optimisticEmployee = requireRecord(optimisticEmployeeList[EMPLOYEE_EMAIL], 'optimistic employee');
 
             // submitsTo should be set to the policy owner (ESH_EMAIL), not the previous approver
-            expect(optimisticEmployeeList?.[EMPLOYEE_EMAIL]?.submitsTo).toBe(ESH_EMAIL);
-            expect(optimisticEmployeeList?.[EMPLOYEE_EMAIL]?.forwardsTo).toBe('');
+            expect(optimisticEmployee.submitsTo).toBe(ESH_EMAIL);
+            expect(optimisticEmployee.forwardsTo).toBe('');
 
             apiWriteSpy.mockRestore();
         });
 
         it('should preserve preventSelfApproval value and pending state when switching from OPTIONAL to BASIC', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
 
             const policyID = Policy.generatePolicyID();
@@ -3143,7 +3873,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.BASIC, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.BASIC, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             let policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -3161,7 +3891,7 @@ describe('actions/Policy', () => {
             expect(policy?.pendingFields?.approvalMode).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
             expect(policy?.pendingFields?.preventSelfApproval).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD);
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
@@ -3181,7 +3911,7 @@ describe('actions/Policy', () => {
         });
 
         it('should preserve preventSelfApproval value and pending state when switching to OPTIONAL while preventSelfApproval is disabled', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
 
             const policyID = Policy.generatePolicyID();
@@ -3199,7 +3929,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             let policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -3217,7 +3947,7 @@ describe('actions/Policy', () => {
             expect(policy?.pendingFields?.approvalMode).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
             expect(policy?.pendingFields?.preventSelfApproval).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD);
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
@@ -3237,7 +3967,7 @@ describe('actions/Policy', () => {
         });
 
         it('should disable preventSelfApproval and set its pending state when switching to OPTIONAL while preventSelfApproval is enabled', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
             await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
 
             const policyID = Policy.generatePolicyID();
@@ -3252,7 +3982,7 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`, fakePolicy);
             await waitForBatchedUpdates();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             let policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -3270,7 +4000,7 @@ describe('actions/Policy', () => {
             expect(policy?.pendingFields?.approvalMode).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
             expect(policy?.pendingFields?.preventSelfApproval).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
 
-            (fetch as MockFetch)?.resume?.();
+            mockFetch?.resume?.();
             await waitForBatchedUpdates();
 
             policy = await new Promise((resolve) => {
@@ -3309,7 +4039,7 @@ describe('actions/Policy', () => {
 
             mockFetch?.fail?.();
 
-            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL);
+            Policy.setWorkspaceApprovalMode(fakePolicy, ESH_EMAIL, CONST.POLICY.APPROVAL_MODE.OPTIONAL, ESH_ACCOUNT_ID, ESH_EMAIL, false);
             await waitForBatchedUpdates();
 
             const policy: OnyxEntry<PolicyType> = await new Promise((resolve) => {
@@ -3355,6 +4085,8 @@ describe('actions/Policy', () => {
                 policyName: fakePolicy.name,
                 lastAccessedWorkspacePolicyID: undefined,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [fakeReport],
                 transactionViolations: undefined,
                 reimbursementAccountError: {},
@@ -3424,11 +4156,11 @@ describe('actions/Policy', () => {
             const expenseChatReportID = '1';
             const expenseReportID = '2';
             const transactionID = '3';
-            const expenseChatReport = {
+            const expenseChatReport = createMock<Report>({
                 ...createRandomReport(Number(expenseChatReportID), CONST.REPORT.CHAT_TYPE.POLICY_EXPENSE_CHAT),
                 policyID,
                 iouReportID: expenseReportID,
-            } as Report;
+            });
             await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT}${expenseChatReportID}`, expenseChatReport);
 
             await Onyx.merge(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, {
@@ -3449,6 +4181,8 @@ describe('actions/Policy', () => {
                 policyName: 'test',
                 lastAccessedWorkspacePolicyID: undefined,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [expenseChatReport],
                 transactionViolations: {
                     // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -3513,6 +4247,8 @@ describe('actions/Policy', () => {
                 policyName: randomGroupPolicy.name,
                 lastAccessedWorkspacePolicyID: undefined,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [],
                 transactionViolations: undefined,
                 reimbursementAccountError: undefined,
@@ -3552,6 +4288,8 @@ describe('actions/Policy', () => {
                 policyName: policyToDelete.name,
                 lastAccessedWorkspacePolicyID,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [],
                 transactionViolations: undefined,
                 reimbursementAccountError: undefined,
@@ -3593,6 +4331,8 @@ describe('actions/Policy', () => {
                 policyName: policyToDelete.name,
                 lastAccessedWorkspacePolicyID,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [],
                 transactionViolations: undefined,
                 reimbursementAccountError: undefined,
@@ -3639,6 +4379,8 @@ describe('actions/Policy', () => {
                 policyName: fakePolicy.name,
                 lastAccessedWorkspacePolicyID: undefined,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [fakeReport],
                 transactionViolations: undefined,
                 reimbursementAccountError: undefined,
@@ -3679,6 +4421,8 @@ describe('actions/Policy', () => {
                 policyName: fakePolicy.name,
                 lastAccessedWorkspacePolicyID: undefined,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [fakeReport],
                 transactionViolations: undefined,
                 reimbursementAccountError: undefined,
@@ -3720,6 +4464,8 @@ describe('actions/Policy', () => {
                 policyName: fakePolicy.name,
                 lastAccessedWorkspacePolicyID: undefined,
                 policyCardFeeds: undefined,
+                lastSelectedFeed: undefined,
+                lastSelectedExpensifyCardFeed: undefined,
                 reportsToArchive: [fakeReport],
                 transactionViolations: undefined,
                 reimbursementAccountError: undefined,
@@ -3993,7 +4739,6 @@ describe('actions/Policy', () => {
             await new Promise<void>((resolve) => {
                 const connection = Onyx.connect({
                     key: `${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`,
-                    waitForCollectionCallback: false,
                     callback: (policy) => {
                         Onyx.disconnect(connection);
                         expect(policy?.maxExpenseAmountNoItemizedReceipt).toBe(expectedBackendAmount);
@@ -4010,7 +4755,6 @@ describe('actions/Policy', () => {
             await new Promise<void>((resolve) => {
                 const connection = Onyx.connect({
                     key: `${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`,
-                    waitForCollectionCallback: false,
                     callback: (policy) => {
                         Onyx.disconnect(connection);
                         expect(policy?.pendingFields?.maxExpenseAmountNoItemizedReceipt).toBeFalsy();
@@ -4034,7 +4778,6 @@ describe('actions/Policy', () => {
             await new Promise<void>((resolve) => {
                 const connection = Onyx.connect({
                     key: `${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`,
-                    waitForCollectionCallback: false,
                     callback: (policy) => {
                         Onyx.disconnect(connection);
                         expect(policy?.maxExpenseAmountNoItemizedReceipt).toBe(CONST.DISABLED_MAX_EXPENSE_VALUE);
@@ -4210,7 +4953,7 @@ describe('actions/Policy', () => {
         });
 
         it('sets optimistic data with bank account details on the policy', async () => {
-            (fetch as MockFetch)?.pause?.();
+            mockFetch?.pause?.();
 
             const fakePolicy = createRandomPolicy(0);
             fakePolicy.id = FAKE_POLICY_ID;
@@ -4274,7 +5017,7 @@ describe('actions/Policy', () => {
         });
 
         it('restores original policy values on failure, including bank account details', async () => {
-            (fetch as MockFetch)?.fail?.();
+            mockFetch?.fail?.();
 
             const fakePolicy = createRandomPolicy(0);
             fakePolicy.id = FAKE_POLICY_ID;
@@ -4317,7 +5060,7 @@ describe('actions/Policy', () => {
             expect(policy?.errorFields?.reimbursementChoice).toBeDefined();
             expect(policy?.pendingFields?.reimbursementChoice).toBeFalsy();
 
-            (fetch as MockFetch)?.succeed?.();
+            mockFetch?.succeed?.();
         });
 
         it('updates NVP_LAST_PAYMENT_METHOD when shouldUpdateLastPaymentMethod is true and no existing method', async () => {
@@ -4408,8 +5151,8 @@ describe('actions/Policy', () => {
             const calls = TestHelper.getFetchMockCalls(WRITE_COMMANDS.SET_WORKSPACE_REIMBURSEMENT);
             expect(calls).toHaveLength(1);
             const call = calls.at(0);
-            const body = (call?.at(1) as RequestInit)?.body;
-            const params = body instanceof FormData ? Object.fromEntries(body as unknown as Iterable<[string, string]>) : {};
+            const body = readProperty(requireCallArgument(call, 1), 'body');
+            const params = body instanceof FormData ? Object.fromEntries(body.entries()) : {};
             expect(params).toEqual(
                 expect.objectContaining({
                     policyID: FAKE_POLICY_ID,
@@ -4870,9 +5613,75 @@ describe('actions/Policy', () => {
 
             // Then the payer should be reverted
             const updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`);
+            expect(updatedPolicy?.reimburser).toBe('old@test.com');
             expect(updatedPolicy?.achAccount?.reimburser).toBe('old@test.com');
             expect(updatedPolicy?.pendingFields?.reimburser).toBeUndefined();
             expect(updatedPolicy?.errorFields?.reimburser).toBeTruthy();
+        });
+
+        it('should update workspace payer in manual reimbursement mode', async () => {
+            // Given a workspace in manual reimbursement mode with no designated payer
+            const policy = {
+                ...createRandomPolicy(0),
+                reimbursementChoice: CONST.POLICY.REIMBURSEMENT_CHOICES.REIMBURSEMENT_MANUAL,
+                reimburser: '',
+                achAccount: {reimburser: ''},
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`, policy);
+            mockFetch.pause();
+
+            // When setting a designated payer in manual mode
+            Policy.setWorkspacePayer(policy.id, 'payer@manual.com', policy.reimburser);
+
+            // Then optimistic data should set the reimburser
+            await waitForBatchedUpdates();
+            let updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`);
+            expect(updatedPolicy?.reimburser).toBe('payer@manual.com');
+            expect(updatedPolicy?.achAccount?.reimburser).toBe('payer@manual.com');
+            expect(updatedPolicy?.reimbursementChoice).toBe(CONST.POLICY.REIMBURSEMENT_CHOICES.REIMBURSEMENT_MANUAL);
+            expect(updatedPolicy?.pendingFields?.reimburser).toBe(CONST.RED_BRICK_ROAD_PENDING_ACTION.UPDATE);
+
+            // When the fetch resumes and succeeds
+            await mockFetch.resume();
+
+            // Then pendingFields should be cleared and reimburser preserved
+            updatedPolicy = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`);
+            expect(updatedPolicy?.achAccount?.reimburser).toBe('payer@manual.com');
+            expect(updatedPolicy?.pendingFields?.reimburser).toBeUndefined();
+        });
+    });
+
+    describe('isPolicyPayer', () => {
+        it('returns true only for workspace owner when manual reimbursement has no achAccount reimburser', () => {
+            const policy = {
+                ...createRandomPolicy(0),
+                role: CONST.POLICY.ROLE.ADMIN,
+                owner: 'owner@test.com',
+                reimbursementChoice: CONST.POLICY.REIMBURSEMENT_CHOICES.REIMBURSEMENT_MANUAL,
+            };
+
+            expect(isPolicyPayer(policy, 'owner@test.com')).toBe(true);
+            expect(isPolicyPayer(policy, 'other-admin@test.com')).toBe(false);
+        });
+
+        it('returns true for payments admin designated as payer via policy.reimburser without achAccount', () => {
+            const paymentsAdminEmail = 'payments-admin@test.com';
+            const policy = {
+                ...createRandomPolicy(0),
+                type: CONST.POLICY.TYPE.CORPORATE,
+                role: CONST.POLICY.ROLE.PAYMENTS_ADMIN,
+                owner: 'owner@test.com',
+                reimbursementChoice: CONST.POLICY.REIMBURSEMENT_CHOICES.REIMBURSEMENT_MANUAL,
+                reimburser: paymentsAdminEmail,
+                employeeList: {
+                    [paymentsAdminEmail]: {
+                        role: CONST.POLICY.ROLE.PAYMENTS_ADMIN,
+                    },
+                },
+            };
+
+            expect(isPolicyPayer(policy, paymentsAdminEmail)).toBe(true);
+            expect(isPolicyPayer(policy, 'owner@test.com')).toBe(false);
         });
     });
 
@@ -5183,7 +5992,13 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             // When creating policy expense chats for a new member
-            const result = Policy.createPolicyExpenseChats(policyID, {[newMemberEmail]: newMemberAccountID});
+            const result = Policy.createPolicyExpenseChats({
+                policyID,
+                invitedEmailsToAccountIDs: {[newMemberEmail]: newMemberAccountID},
+                currentUser: {accountID: ESH_ACCOUNT_ID},
+                reportActionsList: {},
+                doesPersonalDetailExistByAccountID: {},
+            });
 
             // Then optimistic data should be generated
             expect(result.onyxOptimisticData.length).toBeGreaterThan(0);
@@ -5198,24 +6013,25 @@ describe('actions/Policy', () => {
             const reportOnyxData = result.onyxOptimisticData.find((data) => data.key === `${ONYXKEYS.COLLECTION.REPORT}${reportCreationEntry.reportID}`);
             expect(reportOnyxData).toBeTruthy();
 
-            const reportValue = reportOnyxData?.value as Report;
-            expect(reportValue?.participants).toBeTruthy();
-            expect(reportValue?.participants?.[ESH_ACCOUNT_ID]).toBeTruthy();
-            expect(reportValue?.participants?.[newMemberAccountID]).toBeTruthy();
+            const reportValue = requireRecord(reportOnyxData?.value);
+            const participants = requireRecord(readProperty(reportValue, 'participants'));
+            expect(participants).toBeTruthy();
+            expect(readProperty(participants, String(ESH_ACCOUNT_ID))).toBeTruthy();
+            expect(readProperty(participants, String(newMemberAccountID))).toBeTruthy();
 
             // Then the chat type should be policy expense chat
-            expect(reportValue?.chatType).toBe(CONST.REPORT.CHAT_TYPE.POLICY_EXPENSE_CHAT);
-            expect(reportValue?.policyID).toBe(policyID);
+            expect(readProperty(reportValue, 'chatType')).toBe(CONST.REPORT.CHAT_TYPE.POLICY_EXPENSE_CHAT);
+            expect(readProperty(reportValue, 'policyID')).toBe(policyID);
 
             // Then the owner should be the new member
-            expect(reportValue?.ownerAccountID).toBe(newMemberAccountID);
+            expect(readProperty(reportValue, 'ownerAccountID')).toBe(newMemberAccountID);
 
             // Then workspace chat participants should not have roles assigned (roles are only for non-workspace chats)
-            expect(reportValue?.participants?.[ESH_ACCOUNT_ID]?.role).toBeUndefined();
-            expect(reportValue?.participants?.[newMemberAccountID]?.role).toBeUndefined();
+            expect(readProperty(readProperty(participants, String(ESH_ACCOUNT_ID)), 'role')).toBeUndefined();
+            expect(readProperty(readProperty(participants, String(newMemberAccountID)), 'role')).toBeUndefined();
 
             // Then the new member's notification preference should be overridden to ALWAYS (submitter visibility)
-            expect(reportValue?.participants?.[newMemberAccountID]?.notificationPreference).toBe(CONST.REPORT.NOTIFICATION_PREFERENCE.ALWAYS);
+            expect(readProperty(readProperty(participants, String(newMemberAccountID)), 'notificationPreference')).toBe(CONST.REPORT.NOTIFICATION_PREFERENCE.ALWAYS);
         });
 
         it('should reuse existing chat report if one already exists for the member', async () => {
@@ -5241,13 +6057,88 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             // When creating policy expense chats for the existing member
-            const result = Policy.createPolicyExpenseChats(policyID, {[existingMemberEmail]: existingMemberAccountID});
+            const result = Policy.createPolicyExpenseChats({
+                policyID,
+                invitedEmailsToAccountIDs: {[existingMemberEmail]: existingMemberAccountID},
+                currentUser: {accountID: ESH_ACCOUNT_ID},
+                reportActionsList: {},
+                doesPersonalDetailExistByAccountID: {},
+            });
 
             // Then the existing report should be reused (no new reportActionID)
             const reportCreationEntry = result.reportCreationData[existingMemberEmail];
             expect(reportCreationEntry).toBeTruthy();
             expect(reportCreationEntry.reportID).toBe(existingReportID);
             expect(reportCreationEntry.reportActionID).toBeUndefined();
+        });
+
+        it('should use explicit currentUserAccountID for optimistic report participants instead of Onyx session', async () => {
+            // Set Onyx session to a DIFFERENT accountID to verify the explicit parameter is used
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+            const newMemberEmail = 'newmember@test.com';
+            const newMemberAccountID = 200;
+            const customAccountID = 999;
+
+            const result = Policy.createPolicyExpenseChats({
+                policyID,
+                invitedEmailsToAccountIDs: {[newMemberEmail]: newMemberAccountID},
+                currentUser: {accountID: customAccountID},
+                reportActionsList: {},
+                doesPersonalDetailExistByAccountID: {},
+            });
+
+            // Find the optimistic report data
+            const reportCreationEntry = result.reportCreationData[newMemberEmail];
+            expect(reportCreationEntry).toBeTruthy();
+
+            const reportOnyxData = result.onyxOptimisticData.find((data) => data.key === `${ONYXKEYS.COLLECTION.REPORT}${reportCreationEntry.reportID}`);
+            const reportValue = requireRecord(reportOnyxData?.value);
+            const participants = requireRecord(readProperty(reportValue, 'participants'));
+
+            // Verify the explicit customAccountID is used in participants, not the Onyx session accountID
+            expect(readProperty(participants, String(customAccountID))).toBeTruthy();
+            expect(readProperty(participants, String(ESH_ACCOUNT_ID))).toBeUndefined();
+        });
+
+        it('uses the explicit doesPersonalDetailExistByAccountID map for success-data participants instead of the deprecated personal details list', async () => {
+            const policyID = Policy.generatePolicyID();
+            const newMemberEmail = 'mapmember@test.com';
+            const newMemberAccountID = 314;
+
+            // Given a signed-in user, and a personal details list that does NOT contain the new member
+            // (so the deprecated module-level fallback would treat the member as unknown)
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await Onyx.set(ONYXKEYS.PERSONAL_DETAILS_LIST, {[ESH_ACCOUNT_ID]: {accountID: ESH_ACCOUNT_ID, login: ESH_EMAIL}});
+            await waitForBatchedUpdates();
+
+            const getSuccessValue = (result: ReturnType<typeof Policy.createPolicyExpenseChats>) => {
+                const reportID = result.reportCreationData[newMemberEmail]?.reportID;
+                return result.onyxSuccessData.find((data) => data.key === `${ONYXKEYS.COLLECTION.REPORT}${reportID}`)?.value;
+            };
+            const participantPath = ['participants', String(newMemberAccountID)];
+
+            // When the explicit map says the member exists, the success-data participant is kept ({}), beating the empty fallback
+            const existsResult = Policy.createPolicyExpenseChats({
+                policyID,
+                invitedEmailsToAccountIDs: {[newMemberEmail]: newMemberAccountID},
+                currentUser: {accountID: ESH_ACCOUNT_ID},
+                reportActionsList: {},
+                doesPersonalDetailExistByAccountID: {[newMemberAccountID]: true},
+            });
+            expect(getSuccessValue(existsResult)).toHaveProperty(participantPath, {});
+
+            // When the explicit map says the member does NOT exist, the success-data participant is removed (null)
+            const missingResult = Policy.createPolicyExpenseChats({
+                policyID,
+                invitedEmailsToAccountIDs: {[newMemberEmail]: newMemberAccountID},
+                currentUser: {accountID: ESH_ACCOUNT_ID},
+                reportActionsList: {},
+                doesPersonalDetailExistByAccountID: {[newMemberAccountID]: false},
+            });
+            expect(getSuccessValue(missingResult)).toHaveProperty(participantPath, null);
         });
     });
     describe('setPolicyCustomTaxName', () => {
@@ -6185,7 +7076,7 @@ describe('actions/Policy', () => {
         });
 
         it('falls back to USD when no currency is provided and no personal details exist', () => {
-            const result = Policy.buildOptimisticDistanceRateCustomUnits();
+            const result = Policy.buildOptimisticDistanceRateCustomUnits(undefined);
 
             expect(result.outputCurrency).toBe(CONST.CURRENCY.USD);
             const rate = result.customUnits[result.customUnitID].rates[result.customUnitRateID];
@@ -6214,7 +7105,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, 'USD');
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
+                policyID,
+                makeMeAdmin: false,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6241,7 +7140,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, 'USD');
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
+                policyID,
+                makeMeAdmin: false,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6256,7 +7163,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.PERSONAL_SPEND}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, 'USD');
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.PERSONAL_SPEND},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
+                policyID,
+                makeMeAdmin: false,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6271,7 +7186,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, true, 'USD');
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
+                policyID,
+                makeMeAdmin: true,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6284,17 +7207,16 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace(
-                {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
-                WORKSPACE_NAME,
-                ESH_ACCOUNT_ID,
-                ESH_EMAIL,
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
                 policyID,
-                false,
-                'USD',
-                undefined,
-                CONST.POLICY.TYPE.CORPORATE,
-            );
+                makeMeAdmin: false,
+                type: CONST.POLICY.TYPE.CORPORATE,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6307,7 +7229,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, 'GBP');
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'GBP',
+                policyID,
+                makeMeAdmin: false,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6334,7 +7264,15 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.LOOKING_AROUND}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, 'USD');
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.LOOKING_AROUND},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
+                policyID,
+                makeMeAdmin: false,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6348,8 +7286,17 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const policyID = Policy.generatePolicyID();
-            const fakeFile = {uri: 'file://test-avatar.png', name: 'test-avatar.png'} as File;
-            Policy.createDraftInitialWorkspace({choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM}, WORKSPACE_NAME, ESH_ACCOUNT_ID, ESH_EMAIL, policyID, false, 'USD', fakeFile);
+            const fakeFile = createMock<File>({uri: 'file://test-avatar.png', name: 'test-avatar.png'});
+            Policy.createDraftInitialWorkspace({
+                introSelected: {choice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM},
+                workspaceName: WORKSPACE_NAME,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                currency: 'USD',
+                policyID,
+                makeMeAdmin: false,
+                file: fakeFile,
+            });
             await waitForBatchedUpdates();
 
             const policyDraft = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_DRAFTS}${policyID}`);
@@ -6384,29 +7331,37 @@ describe('actions/Policy', () => {
             await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${iouReport.reportID}`, iouReport);
             await waitForBatchedUpdates();
 
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
             const isIOUReportUsingReportSpy = jest.spyOn(ReportUtils, 'isIOUReportUsingReport').mockReturnValue(true);
 
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            const mockTranslate = ((key: string) => key) as unknown as Parameters<typeof Policy.createWorkspaceFromIOUPayment>[8];
-            Policy.createWorkspaceFromIOUPayment(iouReport, undefined, customAccountID, customEmail, iouReportOwnerEmail, undefined, CONST.CURRENCY.USD, undefined, mockTranslate, {});
+            Policy.createWorkspaceFromIOUPayment({
+                iouReport,
+                reportPreviewAction: undefined,
+                currentUserAccountID: customAccountID,
+                currentUserEmail: customEmail,
+                iouReportOwnerEmail,
+                currentUserLocalCurrency: CONST.CURRENCY.USD,
+                lastWorkspaceNumber: undefined,
+                localeTranslate: TestHelper.translateLocal,
+                reportActionsList: {},
+                doesEmployeePersonalDetailExist: false,
+            });
             await waitForBatchedUpdates();
 
-            const writeOptions = apiWriteSpy.mock.calls.at(0)?.at(2) as {
-                optimisticData?: Array<{key?: string; value?: Record<string, unknown> | null}>;
-            };
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
 
             // Find the policy optimistic data entry
-            const policyOptimisticUpdate = (writeOptions?.optimisticData ?? []).find(
-                (update) => (update.key ?? '').startsWith(ONYXKEYS.COLLECTION.POLICY) && (update.value as {ownerAccountID?: number})?.ownerAccountID !== undefined,
+            const policyOptimisticUpdate = requireRecordArrayProperty(writeOptions, 'optimisticData').find(
+                (update) =>
+                    requireStringProperty(update, 'key').startsWith(ONYXKEYS.COLLECTION.POLICY) && getOptionalNumberProperty(readProperty(update, 'value'), 'ownerAccountID') !== undefined,
             );
 
             // Verify ownerAccountID uses the explicit parameter, not the Onyx session
-            expect((policyOptimisticUpdate?.value as {ownerAccountID?: number})?.ownerAccountID).toBe(customAccountID);
-            expect((policyOptimisticUpdate?.value as {owner?: string})?.owner).toBe(customEmail);
+            expect(getOptionalNumberProperty(readProperty(policyOptimisticUpdate, 'value'), 'ownerAccountID')).toBe(customAccountID);
+            expect(requireStringProperty(readProperty(policyOptimisticUpdate, 'value'), 'owner')).toBe(customEmail);
 
             // Verify that the Onyx session accountID is NOT used
-            expect((policyOptimisticUpdate?.value as {ownerAccountID?: number})?.ownerAccountID).not.toBe(ESH_ACCOUNT_ID);
+            expect(getOptionalNumberProperty(readProperty(policyOptimisticUpdate, 'value'), 'ownerAccountID')).not.toBe(ESH_ACCOUNT_ID);
 
             apiWriteSpy.mockRestore();
             isIOUReportUsingReportSpy.mockRestore();
@@ -6419,20 +7374,18 @@ describe('actions/Policy', () => {
                 type: CONST.REPORT.TYPE.EXPENSE,
             };
 
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            const mockTranslate = ((key: string) => key) as unknown as Parameters<typeof Policy.createWorkspaceFromIOUPayment>[8];
-            const result = Policy.createWorkspaceFromIOUPayment(
-                nonIOUReport,
-                undefined,
-                ESH_ACCOUNT_ID,
-                ESH_EMAIL,
-                'owner@example.com',
-                undefined,
-                CONST.CURRENCY.USD,
-                undefined,
-                mockTranslate,
-                {},
-            );
+            const result = Policy.createWorkspaceFromIOUPayment({
+                iouReport: nonIOUReport,
+                reportPreviewAction: undefined,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                iouReportOwnerEmail: 'owner@example.com',
+                currentUserLocalCurrency: CONST.CURRENCY.USD,
+                lastWorkspaceNumber: undefined,
+                localeTranslate: TestHelper.translateLocal,
+                reportActionsList: {},
+                doesEmployeePersonalDetailExist: false,
+            });
             expect(result).toBeUndefined();
         });
 
@@ -6476,30 +7429,157 @@ describe('actions/Policy', () => {
             await waitForBatchedUpdates();
 
             const isIOUReportUsingReportSpy = jest.spyOn(ReportUtils, 'isIOUReportUsingReport').mockReturnValue(true);
-            const apiWriteSpy = jest.spyOn(require('@libs/API'), 'write').mockImplementation(() => Promise.resolve());
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
 
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            const mockTranslate = ((key: string) => key) as unknown as Parameters<typeof Policy.createWorkspaceFromIOUPayment>[8];
-            const result = Policy.createWorkspaceFromIOUPayment(
+            const result = Policy.createWorkspaceFromIOUPayment({
                 iouReport,
-                undefined,
-                ESH_ACCOUNT_ID,
-                ESH_EMAIL,
+                reportPreviewAction: undefined,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
                 iouReportOwnerEmail,
-                undefined,
-                CONST.CURRENCY.USD,
-                undefined,
-                mockTranslate,
+                currentUserLocalCurrency: CONST.CURRENCY.USD,
+                lastWorkspaceNumber: undefined,
+                localeTranslate: TestHelper.translateLocal,
                 reportActionsList,
-            );
+                doesEmployeePersonalDetailExist: true,
+            });
 
             // Verify the function returns a valid result (not undefined)
             expect(result).toBeDefined();
             expect(result?.policyID).toBeDefined();
             expect(result?.workspaceChatReportID).toBeDefined();
 
+            // The explicit doesEmployeePersonalDetailExist=true is forwarded to createPolicyExpenseChats, so the
+            // employee's success-data participant is kept ({}) even though the employee is absent from PERSONAL_DETAILS_LIST.
+            const writeArgs = apiWriteSpy.mock.calls.at(0)?.at(2);
+            expect(writeArgs).toHaveProperty('successData', expect.arrayContaining([expect.objectContaining({value: expect.objectContaining({participants: {[employeeAccountID]: {}}})})]));
+
             apiWriteSpy.mockRestore();
             isIOUReportUsingReportSpy.mockRestore();
+        });
+
+        it('should clear iouReportID on the old DM chat optimistically and restore it on failure', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            await waitForBatchedUpdates();
+
+            const employeeAccountID = 400;
+            const iouReportOwnerEmail = 'employee@example.com';
+            const oldChatReportID = '901';
+            const movedIouReportID = '900';
+
+            const iouReport: Report = {
+                ...createRandomReport(1, undefined),
+                reportID: movedIouReportID,
+                type: CONST.REPORT.TYPE.IOU,
+                ownerAccountID: employeeAccountID,
+                chatReportID: oldChatReportID,
+                policyID: 'oldPolicyID',
+                currency: CONST.CURRENCY.USD,
+                total: 1500,
+            };
+
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${iouReport.reportID}`, iouReport);
+            await waitForBatchedUpdates();
+
+            const isIOUReportUsingReportSpy = jest.spyOn(ReportUtils, 'isIOUReportUsingReport').mockReturnValue(true);
+            const apiWriteSpy = jest.spyOn(APIModule, 'write').mockImplementation(() => Promise.resolve());
+
+            Policy.createWorkspaceFromIOUPayment({
+                iouReport,
+                reportPreviewAction: undefined,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                iouReportOwnerEmail,
+                currentUserLocalCurrency: CONST.CURRENCY.USD,
+                lastWorkspaceNumber: undefined,
+                localeTranslate: TestHelper.translateLocal,
+                reportActionsList: {},
+                doesEmployeePersonalDetailExist: false,
+            });
+            await waitForBatchedUpdates();
+
+            const writeOptions = requireRecord(requireCallArgument(apiWriteSpy.mock.calls.at(0), 2));
+
+            const oldChatKey = `${ONYXKEYS.COLLECTION.REPORT}${oldChatReportID}`;
+            const optimisticOldChatUpdate = requireRecordArrayProperty(writeOptions, 'optimisticData').find(
+                (update) => requireStringProperty(update, 'key') === oldChatKey && readProperty(readProperty(update, 'value'), 'iouReportID') !== undefined,
+            );
+            const failureOldChatUpdate = requireRecordArrayProperty(writeOptions, 'failureData').find(
+                (update) => requireStringProperty(update, 'key') === oldChatKey && readProperty(readProperty(update, 'value'), 'iouReportID') !== undefined,
+            );
+
+            // Optimistic update should clear the dangling pointer so a fresh IOU report is built
+            // for the next expense in this DM (the moved report otherwise gets reused via getMoneyRequestInformation).
+            expect(optimisticOldChatUpdate).toBeDefined();
+            expect(readProperty(readProperty(optimisticOldChatUpdate, 'value'), 'iouReportID')).toBeNull();
+            expect(readProperty(readProperty(optimisticOldChatUpdate, 'value'), 'hasOutstandingChildRequest')).toBe(false);
+
+            // Failure rollback must restore the previous iouReportID so the DM chat is back to its prior state.
+            expect(failureOldChatUpdate).toBeDefined();
+            expect(readProperty(readProperty(failureOldChatUpdate, 'value'), 'iouReportID')).toBe(movedIouReportID);
+            expect(readProperty(readProperty(failureOldChatUpdate, 'value'), 'hasOutstandingChildRequest')).toBe(true);
+
+            apiWriteSpy.mockRestore();
+            isIOUReportUsingReportSpy.mockRestore();
+        });
+
+        it('should negate the converted transaction amounts on the optimistic data so the expense-report table total stays positive', async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+
+            const employeeAccountID = 400;
+            const iouReportOwnerEmail = 'employee@example.com';
+
+            const iouReport: Report = {
+                ...createRandomReport(1, undefined),
+                reportID: '900',
+                type: CONST.REPORT.TYPE.IOU,
+                ownerAccountID: employeeAccountID,
+                chatReportID: '901',
+                policyID: 'oldPolicyID',
+                currency: CONST.CURRENCY.USD,
+                total: 5000,
+            };
+
+            const transaction: Transaction = {
+                ...createRandomTransaction(900),
+                transactionID: 'transaction900',
+                reportID: iouReport.reportID,
+                amount: 5000,
+                modifiedAmount: '',
+                convertedAmount: 6000,
+            };
+
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${iouReport.reportID}`, iouReport);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`, transaction);
+            await waitForBatchedUpdates();
+
+            Policy.createWorkspaceFromIOUPayment({
+                iouReport,
+                reportPreviewAction: undefined,
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                iouReportOwnerEmail,
+                currentUserLocalCurrency: CONST.CURRENCY.USD,
+                lastWorkspaceNumber: undefined,
+                localeTranslate: TestHelper.translateLocal,
+                reportActionsList: {},
+                doesEmployeePersonalDetailExist: false,
+            });
+            await waitForBatchedUpdates();
+
+            // Optimistic merge: read the stored transaction from Onyx
+            const optimisticTransaction: OnyxEntry<Transaction> = await new Promise((resolve) => {
+                const connection = Onyx.connect({
+                    key: `${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`,
+                    callback: (value) => {
+                        Onyx.disconnect(connection);
+                        resolve(value);
+                    },
+                });
+            });
+
+            expect(optimisticTransaction?.amount).toBe(-5000);
+            expect(optimisticTransaction?.convertedAmount).toBe(-6000);
         });
     });
 });

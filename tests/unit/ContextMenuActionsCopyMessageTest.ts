@@ -1,6 +1,9 @@
 import Clipboard from '@libs/Clipboard';
 import getClipboardText from '@libs/Clipboard/getClipboardText';
+
 import CONST from '@src/CONST';
+
+import {formatPhoneNumber} from '../utils/TestHelper';
 
 jest.mock(
     'expo-web-browser',
@@ -14,7 +17,6 @@ jest.mock('@components/Reactions/MiniQuickEmojiReactions', () => 'MiniQuickEmoji
 jest.mock('@components/Reactions/QuickEmojiReactions', () => 'QuickEmojiReactions');
 
 jest.mock('@libs/Clipboard', () => ({
-    // eslint-disable-next-line @typescript-eslint/naming-convention
     __esModule: true,
     default: {
         canSetHtml: jest.fn(),
@@ -24,7 +26,6 @@ jest.mock('@libs/Clipboard', () => ({
 }));
 
 jest.mock('@libs/Clipboard/getClipboardText', () => ({
-    // eslint-disable-next-line @typescript-eslint/naming-convention
     __esModule: true,
     default: jest.fn(),
 }));
@@ -41,7 +42,6 @@ type ContextMenuAction = {
     onPress?: (closePopover: boolean, payload: Record<string, unknown>) => void;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const {default: ContextMenuActions} = require('@pages/inbox/report/ContextMenu/ContextMenuActions') as {default: ContextMenuAction[]};
 
 const copyMessageAction = ContextMenuActions.find((action) => action.sentryLabel === CONST.SENTRY_LABEL.CONTEXT_MENU.COPY_MESSAGE);
@@ -52,6 +52,22 @@ const createPayload = (selection: string): Record<string, unknown> => ({
         message: [{html: selection}],
     },
     selection,
+    report: {},
+    originalReport: {},
+    getLocalDateFromDatetime: jest.fn(),
+    policyTags: {},
+    translate: (translateKey: string) => translateKey,
+    formatPhoneNumber,
+    currentUserPersonalDetails: {
+        accountID: 1,
+        login: 'user@expensify.com',
+        email: 'user@expensify.com',
+    },
+});
+
+const createReportActionPayload = (reportAction: Record<string, unknown>): Record<string, unknown> => ({
+    reportAction,
+    selection: '',
     report: {},
     originalReport: {},
     getLocalDateFromDatetime: jest.fn(),
@@ -99,5 +115,38 @@ describe('ContextMenuActions copy message', () => {
         expect(mockGetClipboardText).toHaveBeenCalledWith(selection);
         expect(mockClipboard.setHtml).toHaveBeenCalledWith(selection, 'Expensify');
         expect(mockClipboard.setString).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [
+            CONST.REPORT.ACTIONS.TYPE.POLICY_CHANGE_LOG.ADD_AGENT_RULE,
+            {ruleTitle: 'Receipts required', prompt: 'Flag any expense over $25 that is missing a receipt'},
+            'workspaceActions.agentRule.added',
+        ],
+        [
+            CONST.REPORT.ACTIONS.TYPE.POLICY_CHANGE_LOG.UPDATE_AGENT_RULE,
+            {ruleTitle: 'Receipts required', prompt: 'Reject any expense that includes alcohol'},
+            'workspaceActions.agentRule.updated',
+        ],
+        [CONST.REPORT.ACTIONS.TYPE.POLICY_CHANGE_LOG.DELETE_AGENT_RULE, {ruleTitle: 'Receipts required'}, 'workspaceActions.agentRule.deleted'],
+    ])('copies the localized message for a %s action', (actionName, originalMessage, expectedTranslationKey) => {
+        mockClipboard.canSetHtml.mockReturnValue(false);
+        mockGetClipboardText.mockReturnValue('mocked clipboard text');
+
+        if (!copyMessageAction?.onPress) {
+            throw new Error('Copy message context menu action was not found');
+        }
+
+        copyMessageAction.onPress(
+            false,
+            createReportActionPayload({
+                actionName,
+                message: [{html: ''}],
+                originalMessage,
+            }),
+        );
+
+        expect(mockGetClipboardText).toHaveBeenCalledWith(expectedTranslationKey);
+        expect(mockClipboard.setString).toHaveBeenCalledWith('mocked clipboard text');
     });
 });

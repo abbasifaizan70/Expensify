@@ -1,30 +1,31 @@
-import {useNavigation, useRoute} from '@react-navigation/native';
-import type {ReactNode} from 'react';
-import React, {useEffect, useState} from 'react';
-import type {OnyxEntry} from 'react-native-onyx';
-import FullPageNotFoundView from '@components/BlockingViews/FullPageNotFoundView';
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useNetwork from '@hooks/useNetwork';
 import useOnyx from '@hooks/useOnyx';
 import useReportIsArchived from '@hooks/useReportIsArchived';
-import useResponsiveLayout from '@hooks/useResponsiveLayout';
-import useThemeStyles from '@hooks/useThemeStyles';
+
 import getNonEmptyStringOnyxID from '@libs/getNonEmptyStringOnyxID';
-import Log from '@libs/Log';
 import Navigation from '@libs/Navigation/Navigation';
 import {getOneTransactionThreadReportID, isReportActionVisible, isWhisperAction} from '@libs/ReportActionsUtils';
 import {canUserPerformWriteAction} from '@libs/ReportUtils';
+
 import ONYXKEYS from '@src/ONYXKEYS';
 import {getReportActionByIDSelector} from '@src/selectors/ReportAction';
 import {isLoadingInitialReportActionsSelector} from '@src/selectors/ReportMetaData';
 import type {ReportActions} from '@src/types/onyx';
+
+import type {ReactNode} from 'react';
+import type {OnyxEntry} from 'react-native-onyx';
+
+import {useNavigation, useRoute} from '@react-navigation/native';
+import React, {useEffect, useState} from 'react';
+
 import cleanStaleReportActionBackToParam from './cleanStaleReportActionBackToParam';
+import useAutoNavigateForDeletedLinkedAction from './hooks/useAutoNavigateForDeletedLinkedAction';
 
 type LinkedActionNotFoundGuardProps = {
     children: ReactNode;
 };
 
-// eslint-disable-next-line rulesdir/no-negated-variables
 function LinkedActionNotFoundGuard({children}: LinkedActionNotFoundGuardProps) {
     const route = useRoute();
     const routeParams = route.params as {reportActionID?: string} | undefined;
@@ -49,7 +50,6 @@ type LinkedActionNotFoundGateProps = {
     children: ReactNode;
 };
 
-// eslint-disable-next-line rulesdir/no-negated-variables
 function LinkedActionNotFoundGate({reportActionIDFromRoute, children}: LinkedActionNotFoundGateProps) {
     const route = useRoute();
     const navigation = useNavigation();
@@ -57,14 +57,12 @@ function LinkedActionNotFoundGate({reportActionIDFromRoute, children}: LinkedAct
     const routeParams = route.params as {reportID?: string; reportActionID?: string} | undefined;
     const reportIDFromRoute = getNonEmptyStringOnyxID(routeParams?.reportID);
 
-    const styles = useThemeStyles();
     const {accountID: currentUserAccountID} = useCurrentUserPersonalDetails();
-    const {shouldUseNarrowLayout} = useResponsiveLayout();
     const {isOffline} = useNetwork();
 
     const [report] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${reportIDFromRoute}`);
     const [chatReport] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT}${getNonEmptyStringOnyxID(report?.chatReportID)}`);
-    const [isLoadingInitialReportActions = true] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_METADATA}${reportIDFromRoute}`, {
+    const [isLoadingInitialReportActions = true] = useOnyx(`${ONYXKEYS.COLLECTION.RAM_ONLY_REPORT_LOADING_STATE}${reportIDFromRoute}`, {
         selector: isLoadingInitialReportActionsSelector,
     });
     const [reportActions] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${reportIDFromRoute}`);
@@ -77,13 +75,9 @@ function LinkedActionNotFoundGate({reportActionIDFromRoute, children}: LinkedAct
     // actions collection rather than the route's report. Fall back to looking it up there so a
     // copied link of a thread message opened in the parent expense context isn't flagged "not found".
     const transactionThreadReportID = getOneTransactionThreadReportID(report, chatReport, reportActions ?? {}, isOffline);
-    const [linkedActionInTransactionThread] = useOnyx(
-        `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${getNonEmptyStringOnyxID(transactionThreadReportID)}`,
-        {
-            selector: (actions: OnyxEntry<ReportActions>) => getReportActionByIDSelector(actions, reportActionIDFromRoute),
-        },
-        [reportActionIDFromRoute],
-    );
+    const [linkedActionInTransactionThread] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${getNonEmptyStringOnyxID(transactionThreadReportID)}`, {
+        selector: (actions: OnyxEntry<ReportActions>) => getReportActionByIDSelector(actions, reportActionIDFromRoute),
+    });
 
     const linkedAction = linkedActionInRoute ?? linkedActionInTransactionThread;
 
@@ -108,52 +102,22 @@ function LinkedActionNotFoundGate({reportActionIDFromRoute, children}: LinkedAct
 
     // Track whether isLoadingInitialReportActions has been true at least once during this mount.
     // For previously loaded reports, stale metadata may already have isLoadingInitialReportActions: false
-    // before openReport() fires its optimistic update — without this guard we'd flash "not found".
+    // before openReport() fires its optimistic update — without this guard we'd navigate away prematurely.
     const [hasSeenLoadingCycle, setHasSeenLoadingCycle] = useState(false);
     if (isLoadingInitialReportActions && !hasSeenLoadingCycle) {
         setHasSeenLoadingCycle(true);
     }
 
-    // Show "comment not found" when the linked action was NEVER visible during this mount:
+    // Auto-recover to the end of the report when the linked action was NEVER visible during this mount:
     // 1. The action exists but is deleted/hidden (and was never visible)
     // 2. The action doesn't exist in the collection after loading completes (and was never visible)
     //
     // When wasEverVisible is true and the action disappears, the cleanup effect below
-    // handles navigation via setParams instead. Gating on !wasEverVisible here prevents
-    // a flash of the "not found" page on mobile (NativeStackView commits UI synchronously
-    // before the effect can fire).
+    // handles navigation via setParams instead.
     //
     // Note: the inaccessible whisper case is handled separately by the whisper effect.
-    // eslint-disable-next-line rulesdir/no-negated-variables
-    const shouldShowNotFoundLinkedAction =
+    const isLinkedActionUnavailable =
         !wasEverVisible && !isLinkedActionInaccessibleWhisper && (isLinkedActionDeleted || (hasSeenLoadingCycle && !isLoadingInitialReportActions && !linkedAction));
-
-    useEffect(() => {
-        if (!shouldShowNotFoundLinkedAction) {
-            return;
-        }
-
-        Log.info('[ReportScreen] Displaying NotFound Page for linked action', false, {
-            reportIDFromRoute,
-            reportActionIDFromRoute,
-            isLoadingInitialReportActions,
-            hasSeenLoadingCycle,
-            isLinkedActionDeleted,
-            isLinkedActionInaccessibleWhisper,
-            wasEverVisible,
-            linkedActionExists: !!linkedAction,
-        });
-    }, [
-        shouldShowNotFoundLinkedAction,
-        reportIDFromRoute,
-        reportActionIDFromRoute,
-        isLoadingInitialReportActions,
-        hasSeenLoadingCycle,
-        isLinkedActionDeleted,
-        isLinkedActionInaccessibleWhisper,
-        wasEverVisible,
-        linkedAction,
-    ]);
 
     // Action was deleted or completely removed while we were viewing it — navigate away.
     // This handles both: (1) action exists but is hidden/deleted, and (2) action was
@@ -195,22 +159,9 @@ function LinkedActionNotFoundGate({reportActionIDFromRoute, children}: LinkedAct
         Navigation.setParams({reportActionID: undefined}, route.key, navigatorKey);
     };
 
-    return (
-        <FullPageNotFoundView
-            shouldShow={shouldShowNotFoundLinkedAction}
-            subtitleKey="notFound.commentYouLookingForCannotBeFound"
-            subtitleStyle={[styles.textSupporting]}
-            shouldShowBackButton={shouldUseNarrowLayout}
-            onBackButtonPress={navigateToEndOfReport}
-            shouldShowLink
-            linkTranslationKey="notFound.goToChatInstead"
-            subtitleKeyBelowLink="notFound.contactConcierge"
-            onLinkPress={navigateToEndOfReport}
-            shouldDisplaySearchRouter
-        >
-            {children}
-        </FullPageNotFoundView>
-    );
+    useAutoNavigateForDeletedLinkedAction(isLinkedActionUnavailable, navigateToEndOfReport);
+
+    return children;
 }
 
 LinkedActionNotFoundGuard.displayName = 'LinkedActionNotFoundGuard';

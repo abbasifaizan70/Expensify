@@ -1,7 +1,5 @@
-import {NavigationContainer} from '@react-navigation/native';
-import type * as NativeNavigation from '@react-navigation/native';
 import {act, render} from '@testing-library/react-native';
-import Onyx from 'react-native-onyx';
+
 import {trackExpense} from '@libs/actions/IOU/TrackExpense';
 import {addPaymentCard, addSubscriptionPaymentCard} from '@libs/actions/PaymentMethods';
 import {createWorkspace} from '@libs/actions/Policy/Policy';
@@ -9,9 +7,16 @@ import GoogleTagManager from '@libs/GoogleTagManager';
 import OnboardingModalNavigator from '@libs/Navigation/AppNavigator/Navigators/OnboardingModalNavigator';
 import navigationRef from '@libs/Navigation/navigationRef';
 import {getCardForSubscriptionBilling} from '@libs/SubscriptionUtils';
+
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {FundList} from '@src/types/onyx';
+
+import type * as NativeNavigation from '@react-navigation/native';
+
+import {NavigationContainer} from '@react-navigation/native';
+import Onyx from 'react-native-onyx';
+
 import getOnyxValue from '../utils/getOnyxValue';
 import waitForBatchedUpdatesWithAct from '../utils/waitForBatchedUpdatesWithAct';
 
@@ -41,7 +46,6 @@ jest.mock('@libs/Navigation/navigationRef', () => {
         index: 0,
     };
     return {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
         __esModule: true,
         default: {
             getRootState: jest.fn(() => mockState),
@@ -60,10 +64,8 @@ jest.mock('@libs/Navigation/navigationRef', () => {
 
 // Mock react-navigation/native to prevent navigation errors
 jest.mock('@react-navigation/native', () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const actualNav = jest.requireActual<typeof NativeNavigation>('@react-navigation/native');
     return {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
         ...actualNav,
         useNavigationState: () => true,
         useRoute: jest.fn(),
@@ -124,12 +126,13 @@ const FUND_LIST: FundList = {
 
 describe('GoogleTagManagerTest', () => {
     const accountID = 123456;
+    const email = 'test@test.com';
 
     beforeAll(() => {
         Onyx.init({
             keys: ONYXKEYS,
             initialKeyStates: {
-                session: {accountID},
+                session: {accountID, email},
             },
         });
     });
@@ -159,39 +162,45 @@ describe('GoogleTagManagerTest', () => {
 
         // Then we publish the sign_up event only once
         expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
-        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.SIGN_UP, accountID);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.SIGN_UP.NAME, accountID, email);
     });
 
     test('workspace_created', async () => {
         // When we run the createWorkspace action a few times
         createWorkspace({
+            conciergeChat: undefined,
             policyName: '',
             introSelected: undefined,
             currentUserAccountIDParam: 123456,
-            activePolicyID: undefined,
+            activePolicy: undefined,
             currentUserEmailParam: 'test@test.com',
+            currency: undefined,
             isSelfTourViewed: false,
             betas: undefined,
             hasActiveAdminPolicies: false,
         });
         await waitForBatchedUpdatesWithAct();
         createWorkspace({
+            conciergeChat: undefined,
             policyName: '',
             currentUserAccountIDParam: 123456,
-            activePolicyID: undefined,
+            activePolicy: undefined,
             currentUserEmailParam: 'test@test.com',
             introSelected: undefined,
+            currency: undefined,
             isSelfTourViewed: false,
             betas: undefined,
             hasActiveAdminPolicies: true,
         });
         await waitForBatchedUpdatesWithAct();
         createWorkspace({
+            conciergeChat: undefined,
             policyName: '',
             currentUserAccountIDParam: 123456,
-            activePolicyID: undefined,
+            activePolicy: undefined,
             currentUserEmailParam: 'test@test.com',
             introSelected: undefined,
+            currency: undefined,
             isSelfTourViewed: false,
             betas: undefined,
             hasActiveAdminPolicies: true,
@@ -200,13 +209,64 @@ describe('GoogleTagManagerTest', () => {
 
         // Then we publish a workspace_created event only once
         expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
-        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED, 123456);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED.NAME, 123456, email);
+    });
+
+    test('workspace_created_sales_eligible', async () => {
+        // When we create a first workspace with the "Manage my team" intent, a company of 5+ employees, and a private email domain
+        createWorkspace({
+            conciergeChat: undefined,
+            policyName: '',
+            introSelected: undefined,
+            currentUserAccountIDParam: 123456,
+            activePolicy: undefined,
+            currentUserEmailParam: 'test@test.com',
+            currency: undefined,
+            isSelfTourViewed: false,
+            betas: undefined,
+            hasActiveAdminPolicies: false,
+            engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+            companySize: CONST.ONBOARDING_COMPANY_SIZE.MICRO_MEDIUM,
+        });
+        await waitForBatchedUpdatesWithAct();
+
+        // Then we publish the sales-eligible workspace_created event
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED_SALES_ELIGIBLE.NAME, 123456, email);
+    });
+
+    test('workspace_created - public email domain is not sales eligible', async () => {
+        // When we create a first workspace that meets the intent and company size criteria but uses a public email domain
+        createWorkspace({
+            conciergeChat: undefined,
+            policyName: '',
+            introSelected: undefined,
+            currentUserAccountIDParam: 123456,
+            activePolicy: undefined,
+            currentUserEmailParam: 'test@gmail.com',
+            currency: undefined,
+            isSelfTourViewed: false,
+            betas: undefined,
+            hasActiveAdminPolicies: false,
+            engagementChoice: CONST.ONBOARDING_CHOICES.MANAGE_TEAM,
+            companySize: CONST.ONBOARDING_COMPANY_SIZE.MICRO_MEDIUM,
+        });
+        await waitForBatchedUpdatesWithAct();
+
+        // Then we publish the standard workspace_created event
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED.NAME, 123456, 'test@gmail.com');
     });
 
     test('workspace_created - categorizeTrackedExpense', async () => {
+        await act(async () => {
+            await Onyx.set(ONYXKEYS.SESSION, {accountID, email});
+        });
+
         const recentWaypoints = (await getOnyxValue(ONYXKEYS.NVP_RECENT_WAYPOINTS)) ?? [];
 
         trackExpense({
+            conciergeChat: undefined,
             report: {reportID: '123'},
             isDraftPolicy: true,
             action: CONST.IOU.ACTION.CATEGORIZE,
@@ -229,22 +289,24 @@ describe('GoogleTagManagerTest', () => {
                 linkedTrackedExpenseReportID: 'linkedTrackedExpenseReportID',
             },
             isASAPSubmitBetaEnabled: false,
-            currentUserAccountIDParam: accountID,
-            currentUserEmailParam: 'test@test.com',
+            currentUser: {accountID, email: 'test@test.com'},
             introSelected: undefined,
-            activePolicyID: undefined,
             quickAction: undefined,
             recentWaypoints,
             betas: [CONST.BETAS.ALL],
-            draftTransactionIDs: [],
             isSelfTourViewed: false,
+            currentUserLocalCurrency: undefined,
+            delegateAccountID: undefined,
+            reportActionsList: undefined,
         });
 
         await waitForBatchedUpdatesWithAct();
 
-        // Then we publish a workspace_created event only once
+        // Then we publish the standard workspace_created event only once. This path always builds the workspace with the
+        // "Track expenses for my business" intent (see TrackExpense.ts), which never meets the sales-eligible criteria, so
+        // it can never publish workspace_created_sales_eligible.
         expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
-        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith('workspace_created', accountID);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.WORKSPACE_CREATED.NAME, accountID, email);
     });
 
     test('paid_adoption - addPaymentCard', async () => {
@@ -261,7 +323,7 @@ describe('GoogleTagManagerTest', () => {
 
         // Then we publish a paid_adoption event only once
         expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
-        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.PAID_ADOPTION, accountID);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.PAID_ADOPTION.NAME, accountID, email);
     });
 
     test('paid_adoption - addSubscriptionPaymentCard', async () => {
@@ -284,7 +346,7 @@ describe('GoogleTagManagerTest', () => {
 
         // Then we publish a paid_adoption event only once
         expect(GoogleTagManager.publishEvent).toHaveBeenCalledTimes(1);
-        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.PAID_ADOPTION, accountID);
+        expect(GoogleTagManager.publishEvent).toHaveBeenCalledWith(CONST.ANALYTICS.EVENT.PAID_ADOPTION.NAME, accountID, email);
     });
 
     it('addSubscriptionPaymentCard when changing payment card, will not publish event paid_adoption', async () => {

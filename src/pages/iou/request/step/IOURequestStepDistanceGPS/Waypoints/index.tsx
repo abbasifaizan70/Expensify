@@ -1,18 +1,24 @@
-import React from 'react';
-import {View} from 'react-native';
 import MenuItemWithTopDescription from '@components/MenuItemWithTopDescription';
 import ScrollView from '@components/ScrollView';
-import Text from '@components/Text';
+
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
-import useStyleUtils from '@hooks/useStyleUtils';
 import useThemeStyles from '@hooks/useThemeStyles';
-import DistanceRequestUtils from '@libs/DistanceRequestUtils';
-import variables from '@styles/variables';
-import {isTripCaptured as isTripCapturedUtil} from '@src/libs/GPSDraftDetailsUtils';
+
+import type {MoneyRequestNavigatorParamList} from '@libs/Navigation/types';
+
+import {getEffectiveEndPoint, getFirstGpsPoint, getTotalGpsTripPoints, isTripStopped as isTripStoppedUtil} from '@src/libs/GPSDraftDetailsUtils';
 import ONYXKEYS from '@src/ONYXKEYS';
+import type SCREENS from '@src/SCREENS';
 import type {Unit} from '@src/types/onyx/Policy';
+
+import React from 'react';
+import {View} from 'react-native';
+
+import DiscardGPSTripButton from './DiscardGPSTripButton';
+import DistanceCounter from './DistanceCounter';
+import EditGPSTripButton from './EditGPSTripButton';
 
 type WaypointsProps = {
     /** Distance unit of the ongoing GPS trip */
@@ -20,66 +26,66 @@ type WaypointsProps = {
 
     /** Whether the screen is in landscape mode */
     isInLandscapeMode: boolean;
-};
+} & MoneyRequestNavigatorParamList[typeof SCREENS.MONEY_REQUEST.GPS_TRIP_EDIT];
 
-function Waypoints({unit, isInLandscapeMode}: WaypointsProps) {
+function Waypoints({unit, isInLandscapeMode, action, iouType, transactionID, reportID, backToReport}: WaypointsProps) {
     const styles = useThemeStyles();
-    const StyleUtils = useStyleUtils();
     const [gpsDraftDetails] = useOnyx(ONYXKEYS.GPS_DRAFT_DETAILS);
     const {translate} = useLocalize();
 
-    const icons = useMemoizedLazyExpensifyIcons(['Location', 'Crosshair', 'DotIndicatorUnfilled']);
+    const icons = useMemoizedLazyExpensifyIcons(['Location', 'DotIndicatorUnfilled']);
 
     // eslint-disable-next-line rulesdir/no-negated-variables
-    const isTripNotInitialized = (gpsDraftDetails?.gpsPoints?.length ?? 0) === 0 && !gpsDraftDetails?.isTracking;
+    const isTripNotInitialized = getTotalGpsTripPoints(gpsDraftDetails) === 0 && !gpsDraftDetails?.isTracking;
 
     if (isTripNotInitialized) {
         return null;
     }
 
-    const isTripCaptured = isTripCapturedUtil(gpsDraftDetails);
+    const firstPoint = getFirstGpsPoint(gpsDraftDetails);
+    const effectiveEndPoint = getEffectiveEndPoint(gpsDraftDetails);
 
-    const shouldShowLoadingEndAddress = isTripCaptured && !gpsDraftDetails?.endAddress?.value;
-    const shouldShowLoadingStartAddress = !gpsDraftDetails?.startAddress?.value;
+    const isTripStopped = isTripStoppedUtil(gpsDraftDetails);
 
-    const distance = DistanceRequestUtils.convertDistanceUnit(gpsDraftDetails?.distanceInMeters ?? 0, unit).toFixed(1);
-
-    const Wrapper = isInLandscapeMode ? ScrollView : View;
+    const shouldShowLoadingEndAddress = isTripStopped && !effectiveEndPoint?.address?.value;
+    const shouldShowLoadingStartAddress = !firstPoint?.address?.value;
 
     const getEndAddressTitle = () => {
         if (shouldShowLoadingEndAddress) {
             return '...';
         }
 
-        if (isTripCaptured) {
-            return gpsDraftDetails?.endAddress?.value;
+        if (isTripStopped) {
+            return effectiveEndPoint?.address?.value;
         }
 
         return translate('gps.trackingDistance');
     };
 
+    const Wrapper = isInLandscapeMode ? ScrollView : View;
+
     return (
         <Wrapper style={[styles.pt2, styles.pb4]}>
-            <MenuItemWithTopDescription
-                interactive={false}
-                description={translate('common.distance')}
-                titleComponent={
-                    <Text style={[styles.iouAmountTextInput, styles.textXLarge, styles.colorMuted, styles.ml3]}>
-                        <Text style={[styles.iouAmountTextInput, styles.textXLarge]}>{distance}</Text>
-                        {` ${unit}`}
-                    </Text>
-                }
-                icon={icons.Crosshair}
-                style={styles.pv3}
-                shouldIconUseAutoWidthStyle
-                descriptionTextStyle={StyleUtils.getFontSizeStyle(variables.fontSizeLabel)}
-            />
+            <View style={[styles.flexRow, styles.justifyContentBetween, styles.alignItemsCenter, styles.gap3, styles.ph5]}>
+                <View style={[styles.flex1]}>
+                    <DistanceCounter unit={unit} />
+                </View>
+
+                <DiscardGPSTripButton />
+                <EditGPSTripButton
+                    action={action}
+                    iouType={iouType}
+                    transactionID={transactionID}
+                    reportID={reportID}
+                    backToReport={backToReport}
+                />
+            </View>
 
             <MenuItemWithTopDescription
                 interactive={false}
                 description={translate('gps.start')}
                 shouldShowLoadingSpinnerIcon={shouldShowLoadingStartAddress}
-                title={shouldShowLoadingStartAddress ? '...' : gpsDraftDetails?.startAddress?.value}
+                title={shouldShowLoadingStartAddress ? '...' : firstPoint?.address?.value}
                 icon={icons.DotIndicatorUnfilled}
                 style={styles.pv3}
                 shouldIconUseAutoWidthStyle

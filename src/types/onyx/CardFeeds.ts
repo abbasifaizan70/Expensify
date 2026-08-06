@@ -1,7 +1,9 @@
+import type CONST from '@src/CONST';
+
 import type {LinkAccount} from 'react-native-plaid-link-sdk';
 import type {PlaidAccount} from 'react-plaid-link';
 import type {ValueOf} from 'type-fest';
-import type CONST from '@src/CONST';
+
 import type * as OnyxCommon from './OnyxCommon';
 
 /** Company card feed name */
@@ -37,11 +39,6 @@ type BankName = ValueOf<typeof CONST.COMPANY_CARDS.BANKS>;
  * as a new connection (e.g. banks without an OAuth or Plaid integration).
  */
 type NonConnectableBankName = ValueOf<typeof CONST.COMPANY_CARDS.NON_CONNECTABLE_BANKS>;
-
-/**
- *
- */
-type CardType = ValueOf<typeof CONST.COMPANY_CARDS.CARD_TYPE>;
 
 /**
  * Card type name
@@ -123,6 +120,13 @@ type CustomCardFeedData = OnyxCommon.OnyxValueWithOfflineFeedback<{
     uploadLayoutSettings?: {
         /** User-defined name for the CSV upload layout */
         layoutName?: string;
+
+        /** Unique identifier for this CSV layout instance */
+        instanceID?: string;
+
+        /** Stored column mappings from the most recent CSV import (column name → column index) */
+        columnMappings?: Record<string, string>;
+
         [key: string]: unknown;
     };
 
@@ -218,12 +222,30 @@ type CardFeedsStatusByDomainID = Record<number, CardFeedsStatus>;
  */
 type WorkspaceCardFeedsStatus = Record<CardFeedWithNumber, CardFeedsStatus>;
 
+/** A single travel invoicing provisioning error for a workspace member */
+type TravelInvoicingProvisioningError = {
+    /** Account ID of the member whose card provisioning failed */
+    accountID: number;
+
+    /** Email of the member whose card provisioning failed */
+    email: string;
+
+    /** Whether the scheduled retry has already re-attempted this member */
+    retried?: boolean;
+};
+
+/** Travel invoicing provisioning errors keyed by the failed member's account ID */
+type TravelInvoicingProvisioningErrors = Record<string, TravelInvoicingProvisioningError>;
+
 /** Card feeds model, including domain settings */
 type CardFeeds = {
     /** Feed settings */
     settings: {
         /** User-friendly feed nicknames */
         companyCardNicknames?: Partial<Record<CardFeedWithNumber, string>>;
+
+        /** Custom card names by card ID */
+        companyCardCustomNames?: Record<string, string>;
 
         /** Company cards feeds */
         companyCards?: Partial<Record<CardFeedWithNumber, CustomCardFeedData>>;
@@ -248,8 +270,8 @@ type CardFeeds = {
 
         /** Travel invoicing provisioning data */
         travelInvoicing?: {
-            /** Provisioning errors for workspace members */
-            errors?: string[];
+            /** Provisioning errors keyed by the failed member's account ID */
+            errors?: TravelInvoicingProvisioningErrors;
         };
     };
 } & CardFeedsStatus &
@@ -265,12 +287,6 @@ type AddNewCardFeedData = {
 
     /** Name of the card */
     cardTitle: string;
-
-    /** Indicates the day (preset value) when the statement period for this card ends */
-    statementPeriodEnd?: StatementPeriodEnd;
-
-    /** Indicates the day (custom day) when the statement period for this card ends */
-    statementPeriodEndDay?: StatementPeriodEndDay;
 
     /** Selected bank */
     selectedBank: ValueOf<typeof CONST.COMPANY_CARDS.BANKS> | null;
@@ -304,6 +320,12 @@ type AddNewCardFeedData = {
 
     /** Whether to use advanced fields in the CSV layout */
     useAdvancedFields?: boolean;
+
+    /** Existing instance ID when editing a CSV feed */
+    existingInstanceID?: string;
+
+    /** Account that owns the CSV feed being edited */
+    domainAccountID?: number;
 
     /** Plaid accounts */
     plaidAccounts?: LinkAccount[] | PlaidAccount[];
@@ -353,13 +375,11 @@ export type {
     CardFeedWithDomainID,
     BankName,
     NonConnectableBankName,
-    CardType,
     CardTypeName,
     CompanyCardFeed,
     CompanyCardFeedWithNumber,
     CompanyCardFeedWithDomainID,
     CardFeedDetails,
-    DirectCardFeedData,
     CardFeedProvider,
     CardFeedData,
     CardFeedsStatus,
@@ -373,4 +393,5 @@ export type {
     DomainSettings,
     CombinedCardFeed,
     CombinedCardFeeds,
+    TravelInvoicingProvisioningErrors,
 };

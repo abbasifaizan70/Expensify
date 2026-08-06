@@ -1,26 +1,33 @@
-import React, {useState} from 'react';
-import type {OnyxEntry} from 'react-native-onyx';
+import CompactMenuContext from '@components/CompactMenuContext';
 import MenuItem from '@components/MenuItem';
 import MenuItemWithTopDescription from '@components/MenuItemWithTopDescription';
 import ScrollView from '@components/ScrollView';
+import useUpdateFilterQuery from '@components/Search/hooks/useUpdateFilterQuery';
 import type {SearchQueryJSON} from '@components/Search/types';
+
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
 import useResponsiveLayout from '@hooks/useResponsiveLayout';
 import useThemeStyles from '@hooks/useThemeStyles';
+
 import {close} from '@libs/actions/Modal';
 import Navigation from '@libs/Navigation/Navigation';
-import {buildFilterQueryWithSortDefaults} from '@libs/SearchQueryUtils';
 import {getGroupBySections, getSearchColumnTranslationKey, getViewOptions} from '@libs/SearchUIUtils';
+
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
 import type {SearchAdvancedFiltersForm} from '@src/types/form';
 import type {SearchResults} from '@src/types/onyx';
 import {getEmptyObject} from '@src/types/utils/EmptyObject';
+
+import type {OnyxEntry} from 'react-native-onyx';
+
+import React, {useState} from 'react';
+
+import CurrencyPopup from './CurrencyPopup';
 import GroupByPopup from './GroupByPopup';
-import GroupCurrencyPopup from './GroupCurrencyPopup';
 import SingleSelectPopup from './SingleSelectPopup';
 import SortByPopup from './SortByPopup';
 import SortOrderPopup from './SortOrderPopup';
@@ -38,6 +45,7 @@ function DisplayPopup({queryJSON, searchResults, closeOverlay, onSort}: DisplayP
     const styles = useThemeStyles();
     const {isLargeScreenWidth} = useResponsiveLayout();
     const expensifyIcons = useMemoizedLazyExpensifyIcons(['Columns']);
+    const {updateFilterQueryParams} = useUpdateFilterQuery(queryJSON);
     const [searchAdvancedFilters = getEmptyObject<SearchAdvancedFiltersForm>()] = useOnyx(ONYXKEYS.FORMS.SEARCH_ADVANCED_FILTERS_FORM);
     const [selectedDisplayFilter, setSelectedDisplayFilter] = useState<
         | typeof CONST.SEARCH.SYNTAX_ROOT_KEYS.LIMIT
@@ -52,7 +60,7 @@ function DisplayPopup({queryJSON, searchResults, closeOverlay, onSort}: DisplayP
     const groupBySections = getGroupBySections(translate);
     const groupBy = groupBySections.flatMap((section) => section.options).find((option) => option.value === queryJSON.groupBy) ?? null;
     const viewOptions = getViewOptions(translate);
-    const view = viewOptions.find((option) => option.value === queryJSON.view) ?? viewOptions.at(0) ?? null;
+    const view = viewOptions.find((option) => option.value === queryJSON.view) ?? viewOptions.at(0);
     const shouldShowColumnsButton = isLargeScreenWidth && (queryJSON.type === CONST.SEARCH.DATA_TYPES.EXPENSE || queryJSON.type === CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT);
 
     const limitValue = searchAdvancedFilters[CONST.SEARCH.SYNTAX_ROOT_KEYS.LIMIT];
@@ -116,41 +124,24 @@ function DisplayPopup({queryJSON, searchResults, closeOverlay, onSort}: DisplayP
                     />
                 )}
                 {shouldShowColumnsButton && (
-                    <MenuItem
-                        icon={expensifyIcons.Columns}
-                        title={translate('search.editColumns')}
-                        onPress={() => {
-                            closeOverlay();
-                            openSearchColumns();
-                        }}
-                        sentryLabel={CONST.SENTRY_LABEL.SEARCH.COLUMNS_BUTTON}
-                    />
+                    <CompactMenuContext.Provider value>
+                        <MenuItem
+                            icon={expensifyIcons.Columns}
+                            title={translate('search.editColumns')}
+                            onPress={() => {
+                                closeOverlay();
+                                openSearchColumns();
+                            }}
+                            sentryLabel={CONST.SENTRY_LABEL.SEARCH.COLUMNS_BUTTON}
+                        />
+                    </CompactMenuContext.Provider>
                 )}
             </ScrollView>
         );
     }
 
     const updateFilterForm = (values: Partial<SearchAdvancedFiltersForm>) => {
-        const updatedFilterFormValues: Partial<SearchAdvancedFiltersForm> = {
-            ...searchAdvancedFilters,
-            ...values,
-        };
-
-        if (updatedFilterFormValues.groupBy !== searchAdvancedFilters.groupBy) {
-            updatedFilterFormValues.columns = [];
-        }
-
-        const queryString =
-            buildFilterQueryWithSortDefaults(
-                updatedFilterFormValues,
-                {view: searchAdvancedFilters.view, groupBy: searchAdvancedFilters.groupBy},
-                {sortBy: queryJSON.sortBy, sortOrder: queryJSON.sortOrder},
-            ) ?? '';
-        if (!queryString) {
-            return;
-        }
-
-        close(() => Navigation.setParams({q: queryString, rawQuery: undefined}));
+        close(() => updateFilterQueryParams(values));
     };
 
     const goBack = () => {
@@ -202,10 +193,13 @@ function DisplayPopup({queryJSON, searchResults, closeOverlay, onSort}: DisplayP
             );
         case CONST.SEARCH.SYNTAX_FILTER_KEYS.GROUP_CURRENCY:
             return (
-                <GroupCurrencyPopup
+                <CurrencyPopup
+                    value={searchAdvancedFilters[CONST.SEARCH.SYNTAX_FILTER_KEYS.GROUP_CURRENCY]}
                     onChange={(item) => updateFilterForm({groupCurrency: item?.value})}
+                    label={translate('common.groupCurrency')}
                     onBackButtonPress={goBack}
                     closeOverlay={closeOverlay}
+                    searchPlaceholder={translate('common.groupCurrency')}
                 />
             );
         case CONST.SEARCH.SYNTAX_ROOT_KEYS.VIEW:

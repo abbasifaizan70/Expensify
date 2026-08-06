@@ -1,9 +1,10 @@
-import {InteractionManager} from 'react-native';
 import getIsNarrowLayout from '@libs/getIsNarrowLayout';
 import Navigation, {navigationRef} from '@libs/Navigation/Navigation';
 import {endSubmitFollowUpActionSpan, isTracking as isSubmitTracking, setPendingSubmitFollowUpAction} from '@libs/telemetry/submitFollowUpAction';
+
 import CONST from '@src/CONST';
 import ROUTES from '@src/ROUTES';
+
 import isReportOpenInRHP from './isReportOpenInRHP';
 import isReportOpenInSuperWideRHP from './isReportOpenInSuperWideRHP';
 import isSearchTopmostFullScreenRoute from './isSearchTopmostFullScreenRoute';
@@ -60,13 +61,14 @@ function dismissModalAndOpenReportInInboxTab(reportID: string | undefined, isInv
         if (hasActiveTracking) {
             setPendingSubmitFollowUpAction(CONST.TELEMETRY.SUBMIT_FOLLOW_UP_ACTION.DISMISS_MODAL_ONLY);
         }
-        Navigation.dismissModal();
-        if (hasActiveTracking) {
-            // eslint-disable-next-line @typescript-eslint/no-deprecated -- we need to wait for the modal to be dismissed before marking the span
-            InteractionManager.runAfterInteractions(() => {
+        Navigation.dismissModal({
+            afterTransition: () => {
+                if (!hasActiveTracking) {
+                    return;
+                }
                 endSubmitFollowUpActionSpan(CONST.TELEMETRY.SUBMIT_FOLLOW_UP_ACTION.DISMISS_MODAL_ONLY);
-            });
-        }
+            },
+        });
         return;
     }
     if (hasActiveTracking) {

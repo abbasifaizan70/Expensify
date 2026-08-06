@@ -1,31 +1,38 @@
-import {NavigationContainer} from '@react-navigation/native';
-import type * as ReactNavigation from '@react-navigation/native';
 import {act, render, screen, userEvent, waitFor} from '@testing-library/react-native';
-import React from 'react';
-import Onyx from 'react-native-onyx';
+
 import ComposeProviders from '@components/ComposeProviders';
 import LHNOptionsList from '@components/LHNOptionsList/LHNOptionsList';
 import type {LHNOptionsListProps} from '@components/LHNOptionsList/types';
 import {LocaleContextProvider} from '@components/LocaleContextProvider';
 import OnyxListItemProvider from '@components/OnyxListItemProvider';
+
 import {setHasRadio} from '@libs/NetworkState';
+
 import {showContextMenu} from '@pages/inbox/report/ContextMenu/ReportActionContextMenu';
+
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {Policy, Report, ReportAction} from '@src/types/onyx';
+
+import type * as ReactNavigation from '@react-navigation/native';
+
+import {NavigationContainer} from '@react-navigation/native';
+import React from 'react';
+import Onyx from 'react-native-onyx';
+
+import createMock from '../../utils/createMock';
 import {getFakeReport} from '../../utils/LHNTestUtils';
 
 // Mock dynamic imports that break without --experimental-vm-modules
 jest.mock('@src/languages/IntlStore', () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const en: Record<string, unknown> = require('@src/languages/en').default;
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const flattenObject: (obj: Record<string, unknown>) => Record<string, unknown> = require('@src/languages/flattenObject').default;
 
     const cache = new Map<string, Record<string, unknown>>([['en', flattenObject(en)]]);
 
     return {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
         __esModule: true,
         default: {
             getCurrentLocale: () => 'en',
@@ -215,12 +222,12 @@ describe('LHNOptionsList', () => {
             const reportID = 'dewTestReport';
             const accountID1 = 1;
             const accountID2 = 2;
-            const policy: Policy = {
+            const policy = createMock<Policy>({
                 id: policyID,
                 name: 'DEW Test Policy',
                 type: CONST.POLICY.TYPE.CORPORATE,
                 approvalMode: CONST.POLICY.APPROVAL_MODE.DYNAMICEXTERNAL,
-            } as Policy;
+            });
             const report: Report = {
                 reportID,
                 reportName: 'DEW Test Report',
@@ -273,12 +280,12 @@ describe('LHNOptionsList', () => {
             const accountID1 = 1;
             const accountID2 = 2;
             const expectedLastMessage = 'Expense for lunch meeting';
-            const policy: Policy = {
+            const policy = createMock<Policy>({
                 id: policyID,
                 name: 'DEW Test Policy',
                 type: CONST.POLICY.TYPE.CORPORATE,
                 approvalMode: CONST.POLICY.APPROVAL_MODE.DYNAMICEXTERNAL,
-            } as Policy;
+            });
             const report: Report = {
                 reportID,
                 reportName: 'DEW Test Report',
@@ -336,11 +343,11 @@ describe('LHNOptionsList', () => {
             const accountID1 = 1;
             const accountID2 = 2;
 
-            const policy: Policy = {
+            const policy = createMock<Policy>({
                 id: policyID,
                 name: 'Thread Test Policy',
                 type: CONST.POLICY.TYPE.TEAM,
-            } as Policy;
+            });
 
             const parentReport: Report = {
                 reportID: parentReportID,
@@ -402,11 +409,11 @@ describe('LHNOptionsList', () => {
             const accountID1 = 1;
             const accountID2 = 2;
 
-            const policy: Policy = {
+            const policy = createMock<Policy>({
                 id: policyID,
                 name: 'Expense Request Policy',
                 type: CONST.POLICY.TYPE.TEAM,
-            } as Policy;
+            });
 
             const parentReport: Report = {
                 reportID: parentReportID,
@@ -431,7 +438,7 @@ describe('LHNOptionsList', () => {
                 reportID,
                 reportName: 'Expense Request Thread',
                 type: CONST.REPORT.TYPE.CHAT,
-                chatType: '' as Report['chatType'],
+                chatType: undefined,
                 policyID,
                 parentReportID,
                 parentReportActionID: parentActionID,
@@ -476,11 +483,11 @@ describe('LHNOptionsList', () => {
             const accountID1 = 1;
             const accountID2 = 2;
 
-            const policy: Policy = {
+            const policy = createMock<Policy>({
                 id: policyID,
                 name: 'Task Test Policy',
                 type: CONST.POLICY.TYPE.CORPORATE,
-            } as Policy;
+            });
 
             const parentReport: Report = {
                 reportID: parentReportID,
@@ -540,11 +547,11 @@ describe('LHNOptionsList', () => {
             const accountID1 = 1;
             const accountID2 = 2;
 
-            const invoicePolicy: Policy = {
+            const invoicePolicy = createMock<Policy>({
                 id: policyID,
                 name: 'Invoice Test Policy',
                 type: CONST.POLICY.TYPE.TEAM,
-            } as Policy;
+            });
 
             const invoiceRoom: Report = {
                 reportID: invoiceRoomID,
@@ -604,11 +611,11 @@ describe('LHNOptionsList', () => {
             const ownerAccountID = 1;
             const managerAccountID = 2;
 
-            const policy: Policy = {
+            const policy = createMock<Policy>({
                 id: policyID,
                 name: 'IOU Test Policy',
                 type: CONST.POLICY.TYPE.TEAM,
-            } as Policy;
+            });
 
             const report: Report = {
                 reportID,

@@ -1,20 +1,25 @@
-import type {StackScreenProps} from '@react-navigation/stack';
-import React, {useCallback, useEffect} from 'react';
 import useOnyx from '@hooks/useOnyx';
 import usePermissions from '@hooks/usePermissions';
+
 import {requestTravelAccess, setTravelProvisioningNextStep} from '@libs/actions/Travel';
+import getTravelAcceptTermsRoute from '@libs/getTravelAcceptTermsRoute';
 import Navigation from '@libs/Navigation/Navigation';
 import type {TravelNavigatorParamList} from '@libs/Navigation/types';
+
 import VerifyAccountPageBase from '@pages/settings/VerifyAccountPageBase';
+
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
-import ROUTES from '@src/ROUTES';
 import type SCREENS from '@src/SCREENS';
+
+import type {StackScreenProps} from '@react-navigation/stack';
+
+import React, {useCallback, useEffect} from 'react';
 
 type VerifyAccountPageProps = StackScreenProps<TravelNavigatorParamList, typeof SCREENS.TRAVEL.VERIFY_ACCOUNT>;
 
 function VerifyAccountPage({route}: VerifyAccountPageProps) {
-    const {domain, backTo, policyID} = route.params;
+    const {backTo, policyID} = route.params;
     const [travelProvisioning] = useOnyx(ONYXKEYS.TRAVEL_PROVISIONING);
     const {isBetaEnabled} = usePermissions();
 
@@ -27,7 +32,8 @@ function VerifyAccountPage({route}: VerifyAccountPageProps) {
     const isTravelVerifiedBetaEnabled = isBetaEnabled(CONST.BETAS.IS_TRAVEL_VERIFIED);
 
     // Determine where to navigate after successful OTP validation
-    const navigateForwardTo = isTravelVerifiedBetaEnabled ? (travelProvisioning?.nextStepRoute ?? ROUTES.TRAVEL_TCS.getRoute(domain ?? '', policyID)) : undefined;
+    const defaultForwardRoute = policyID ? getTravelAcceptTermsRoute(policyID) : undefined;
+    const navigateForwardTo = isTravelVerifiedBetaEnabled ? (travelProvisioning?.nextStepRoute ?? defaultForwardRoute) : undefined;
 
     const handleValidationSuccess = useCallback(() => {
         requestTravelAccess();
