@@ -1339,6 +1339,10 @@ function getChangeTransactionsReportOnyxData({
                 hasDependentTags: policyHasDependentTags,
                 isInvoiceTransaction: false,
                 shouldRemoveRejectedExpenseViolation: true,
+                // Moving onto a workspace is a brand-new association with its rates, so a rate that's disabled for
+                // the destination policy shouldn't be grandfathered in the way it is for expenses that already
+                // referenced it before the move (Auth wouldn't grandfather it here either).
+                shouldFlagDisabledCustomUnitRate: true,
                 ownerLogin: undefined,
             });
             optimisticData.push(violationData);

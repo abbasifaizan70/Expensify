@@ -254,7 +254,7 @@ describe('getViolationsOnyxData', () => {
             expect(result.value).not.toContainEqual(customUnitOutOfPolicyViolation);
         });
 
-        it('should keep the customUnitOutOfPolicy violation if the rate exists but is disabled', () => {
+        it('should remove the customUnitOutOfPolicy violation if the rate exists but is only disabled (grandfathered)', () => {
             const customUnitRateID = 'rate_id';
             policy.customUnits = {
                 unitId: {
@@ -268,6 +268,76 @@ describe('getViolationsOnyxData', () => {
                             currency: 'USD',
                             customUnitRateID,
                             enabled: false,
+                            name: 'Default Rate',
+                            rate: 65.5,
+                        },
+                    },
+                },
+            };
+            const result = ViolationsUtils.getViolationsOnyxData({
+                ownerLogin: undefined,
+                updatedTransaction: transaction,
+                transactionViolations,
+                policy,
+                policyTagList: policyTags,
+                policyCategories,
+                hasDependentTags: false,
+                isInvoiceTransaction: false,
+            });
+
+            expect(result.value).not.toContainEqual(expect.objectContaining({name: CONST.VIOLATIONS.CUSTOM_UNIT_OUT_OF_POLICY}));
+        });
+
+        it('should keep the customUnitOutOfPolicy violation for a disabled rate when shouldFlagDisabledCustomUnitRate is set (move to workspace)', () => {
+            const customUnitRateID = 'rate_id';
+            policy.customUnits = {
+                unitId: {
+                    attributes: {unit: 'mi'},
+                    customUnitID: 'unitId',
+                    defaultCategory: 'Car',
+                    enabled: true,
+                    name: 'Distance',
+                    rates: {
+                        [customUnitRateID]: {
+                            currency: 'USD',
+                            customUnitRateID,
+                            enabled: false,
+                            name: 'Default Rate',
+                            rate: 65.5,
+                        },
+                    },
+                },
+            };
+            const result = ViolationsUtils.getViolationsOnyxData({
+                ownerLogin: undefined,
+                updatedTransaction: transaction,
+                transactionViolations,
+                policy,
+                policyTagList: policyTags,
+                policyCategories,
+                hasDependentTags: false,
+                isInvoiceTransaction: false,
+                shouldFlagDisabledCustomUnitRate: true,
+            });
+
+            expect(result.value).toContainEqual(expect.objectContaining({name: CONST.VIOLATIONS.CUSTOM_UNIT_OUT_OF_POLICY}));
+        });
+
+        it('should keep the customUnitOutOfPolicy violation for a rate that is pending deletion even without shouldFlagDisabledCustomUnitRate', () => {
+            const customUnitRateID = 'rate_id';
+            policy.customUnits = {
+                unitId: {
+                    attributes: {unit: 'mi'},
+                    customUnitID: 'unitId',
+                    defaultCategory: 'Car',
+                    enabled: true,
+                    name: 'Distance',
+                    rates: {
+                        [customUnitRateID]: {
+                            currency: 'USD',
+                            customUnitRateID,
+                            enabled: false,
+                            pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE,
                             name: 'Default Rate',
                             rate: 65.5,
                         },
@@ -422,7 +492,7 @@ describe('getViolationsOnyxData', () => {
             );
         });
 
-        it('should remove the customUnitRateOutOfDateRange violation when the rate is out of policy', () => {
+        it('should drop both customUnitOutOfPolicy and customUnitRateOutOfDateRange for a disabled (grandfathered) rate, even when it is also out of date range', () => {
             transactionViolations = [
                 {
                     name: CONST.VIOLATIONS.CUSTOM_UNIT_RATE_OUT_OF_DATE_RANGE,
@@ -465,6 +535,60 @@ describe('getViolationsOnyxData', () => {
                 policyCategories,
                 hasDependentTags: false,
                 isInvoiceTransaction: false,
+            });
+
+            // The rate is disabled but not deleted, so it's grandfathered (in policy). DistanceRequestUtils.isCustomUnitRateOutOfDateRange
+            // already treats any disabled rate as never "out of date range" (that check only matters for a rate a
+            // user could actually select), so a merely-disabled rate now clears both violations rather than trading
+            // customUnitOutOfPolicy for customUnitRateOutOfDateRange.
+            expect(result.value).not.toContainEqual(expect.objectContaining({name: CONST.VIOLATIONS.CUSTOM_UNIT_RATE_OUT_OF_DATE_RANGE}));
+            expect(result.value).not.toContainEqual(expect.objectContaining({name: CONST.VIOLATIONS.CUSTOM_UNIT_OUT_OF_POLICY}));
+        });
+
+        it('should keep customUnitOutOfPolicy (and drop customUnitRateOutOfDateRange) when the disabled, out-of-date-range rate is flagged via shouldFlagDisabledCustomUnitRate', () => {
+            transactionViolations = [
+                {
+                    name: CONST.VIOLATIONS.CUSTOM_UNIT_RATE_OUT_OF_DATE_RANGE,
+                    type: CONST.VIOLATION_TYPES.WARNING,
+                    showInReview: true,
+                    data: {
+                        startDate: '2025-01-01',
+                        endDate: '2025-12-31',
+                    },
+                },
+            ];
+            policy.customUnits = {
+                unitId: {
+                    attributes: {unit: 'mi'},
+                    customUnitID: 'unitId',
+                    defaultCategory: 'Car',
+                    enabled: true,
+                    name: 'Distance',
+                    rates: {
+                        [customUnitRateID]: {
+                            currency: 'USD',
+                            customUnitRateID,
+                            enabled: false,
+                            name: '2025 mileage',
+                            rate: 65.5,
+                            startDate: '2025-01-01',
+                            endDate: '2025-12-31',
+                        },
+                    },
+                },
+            };
+            transaction.created = '2026-06-15';
+
+            const result = ViolationsUtils.getViolationsOnyxData({
+                ownerLogin: undefined,
+                updatedTransaction: transaction,
+                transactionViolations,
+                policy,
+                policyTagList: policyTags,
+                policyCategories,
+                hasDependentTags: false,
+                isInvoiceTransaction: false,
+                shouldFlagDisabledCustomUnitRate: true,
             });
 
             expect(result.value).not.toContainEqual(

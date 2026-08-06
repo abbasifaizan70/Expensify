@@ -468,6 +468,7 @@ const ViolationsUtils = {
         isFromExpenseReport,
         shouldRemoveRejectedExpenseViolation,
         distanceOriginalPolicy,
+        shouldFlagDisabledCustomUnitRate,
         ownerLogin: ownerLoginParam,
     }: {
         updatedTransaction: Transaction;
@@ -482,6 +483,10 @@ const ViolationsUtils = {
         isFromExpenseReport?: boolean;
         shouldRemoveRejectedExpenseViolation?: boolean;
         distanceOriginalPolicy?: OnyxEntry<Policy>;
+        /** Opts into flagging a disabled (but not deleted) custom unit rate as customUnitOutOfPolicy. Auth grandfathers
+         * a disabled rate for expenses that already reference it, so this should stay false everywhere except the
+         * move-to-workspace flow, which is establishing a brand-new association with the destination policy. */
+        shouldFlagDisabledCustomUnitRate?: boolean;
         ownerLogin: string | undefined;
     }): OnyxUpdate<typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS> {
         const isScanning = TransactionUtils.isScanning(updatedTransaction);
@@ -661,7 +666,20 @@ const ViolationsUtils = {
                 }
 
                 const customRate = isPerDiem ? getPerDiemRateCustomUnitRate(policy, customUnitRateID) : getDistanceRateCustomUnitRate(policyForCustomUnitRate, customUnitRateID);
-                if (customRate && customRate.enabled !== false) {
+
+                // A distance rate that's merely disabled (not deleted) is grandfathered by Auth for expenses that
+                // already reference it (Web-Expensify#54303) and the server never raises customUnitOutOfPolicy for
+                // it, so treating it as out-of-policy here was a client-only false positive that flashed on every
+                // recompute. A rate that's pending deletion is not grandfathered - deletePolicyDistanceRates sets
+                // enabled: false together with pendingAction: DELETE, and explicitly pushes this same violation
+                // itself, so it must still resolve to "out of policy" here or a later recompute would silently
+                // reject the violation it just added. Per diem rates, and the move-to-workspace flow (which opts
+                // back into the strict check via shouldFlagDisabledCustomUnitRate), are never grandfathered.
+                const isCustomRatePendingDeletion = customRate?.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE;
+                const isDisabledCustomRateGrandfathered = !isPerDiem && !shouldFlagDisabledCustomUnitRate;
+                const isCustomRateInPolicy = !!customRate && !isCustomRatePendingDeletion && (customRate.enabled !== false || isDisabledCustomRateGrandfathered);
+
+                if (isCustomRateInPolicy) {
                     newTransactionViolations = reject(newTransactionViolations, {name: CONST.VIOLATIONS.CUSTOM_UNIT_OUT_OF_POLICY});
                     newTransactionViolations = syncCustomUnitRateOutOfDateRangeViolation(newTransactionViolations, updatedTransaction, policyForCustomUnitRate);
                 } else if (isSelfDM && isDistanceRequestForCustomUnit) {
