@@ -24,6 +24,7 @@ import {
     isTrackExpenseReport,
     shouldEnableNegative,
 } from '@libs/ReportUtils';
+import {buildSearchQueryJSON} from '@libs/SearchQueryUtils';
 import {
     getAmount,
     getClearedPendingFields,
@@ -59,7 +60,7 @@ import type {NullishDeep, OnyxCollection, OnyxEntry, OnyxKey, OnyxUpdate} from '
 import lodashUnionBy from 'lodash/unionBy';
 import Onyx from 'react-native-onyx';
 
-import {getAllReports, getAllTransactions, getAllTransactionViolations, getRecentAttendees} from '.';
+import {getAllReports, getAllTransactions, getAllTransactionViolations, getRecentAttendees, getSearchQueryByHash} from '.';
 import {getUpdatedMoneyRequestReportData, mergePolicyRecentlyUsedCategories, mergePolicyRecentlyUsedCurrencies} from './MoneyRequestBuilder';
 
 type UpdateMoneyRequestData<TKey extends OnyxKey> = {
@@ -111,6 +112,58 @@ type SearchSnapshotUpdateParams = {
 };
 
 /**
+ * Maps an edited transaction field to the Search filter key it can invalidate. Only fields listed here can make
+ * a cached row stop matching its query; anything else (e.g. `waypoints`) can't change filter membership.
+ */
+const TRANSACTION_FIELD_TO_SEARCH_FILTER_KEY: Record<string, string> = {
+    comment: CONST.SEARCH.SYNTAX_FILTER_KEYS.DESCRIPTION,
+    merchant: CONST.SEARCH.SYNTAX_FILTER_KEYS.MERCHANT,
+    category: CONST.SEARCH.SYNTAX_FILTER_KEYS.CATEGORY,
+    tag: CONST.SEARCH.SYNTAX_FILTER_KEYS.TAG,
+    amount: CONST.SEARCH.SYNTAX_FILTER_KEYS.AMOUNT,
+    currency: CONST.SEARCH.SYNTAX_FILTER_KEYS.CURRENCY,
+    created: CONST.SEARCH.SYNTAX_FILTER_KEYS.DATE,
+    billable: CONST.SEARCH.SYNTAX_FILTER_KEYS.BILLABLE,
+    reimbursable: CONST.SEARCH.SYNTAX_FILTER_KEYS.REIMBURSABLE,
+    taxCode: CONST.SEARCH.SYNTAX_FILTER_KEYS.TAX_RATE,
+};
+
+/**
+ * Whether this edit can push the transaction out of this snapshot's own search query — i.e. the query filters on
+ * a field the edit actually changed (editing the description of a `description:coffee` search), or on the free
+ * text `keyword` filter, which can match any of those fields.
+ *
+ * Deliberately narrow: a `from:`/`date:`/`status:` filter is unaffected by a description edit, so those rows must
+ * keep the normal merge. Removing them would also fight `shouldOptimisticallyUpdateSearch`, which intentionally
+ * populates `from:<currentUser>` snapshots on the creation path.
+ *
+ * The query string for a hash lives in its own Onyx key, so it survives SEARCH responses overwriting the snapshot.
+ */
+function canEditRemoveTransactionFromSearch(hash: number, pendingFields: OnyxTypes.Transaction['pendingFields']): boolean {
+    const editedFilterKeys = new Set<string>();
+    for (const field of Object.keys(pendingFields ?? {})) {
+        const filterKey = TRANSACTION_FIELD_TO_SEARCH_FILTER_KEY[field];
+        if (filterKey) {
+            editedFilterKeys.add(filterKey);
+        }
+    }
+    if (editedFilterKeys.size === 0) {
+        return false;
+    }
+
+    const queryString = getSearchQueryByHash()[String(hash)];
+    if (!queryString) {
+        return false;
+    }
+    const queryJSON = buildSearchQueryJSON(queryString);
+    if (!queryJSON) {
+        return false;
+    }
+
+    return queryJSON.flatFilters.some((filter) => editedFilterKeys.has(filter.key) || filter.key === CONST.SEARCH.SYNTAX_FILTER_KEYS.KEYWORD);
+}
+
+/**
  * Builds Onyx writes for the Search snapshot.
  * Search result rows render from snapshot data, so TRANSACTION writes alone do not refresh the list.
  */
@@ -136,20 +189,37 @@ function getSearchSnapshotUpdates({
     const transactionKey = `${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}` as const;
     const violationsKey = `${ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS}${transactionID}` as const;
 
-    const optimisticSnapshotData: SearchResultDataType = {};
+    const optimisticSnapshotData: NullishDeep<SearchResultDataType> = {};
+    const successSnapshotData: NullishDeep<SearchResultDataType> = {};
+    const failureSnapshotData: NullishDeep<SearchResultDataType> = {};
+
+    // On failure the edit never happened, so both branches restore the original row.
+    failureSnapshotData[transactionKey] = {...transaction, pendingFields: clearedPendingFields};
+    if (currentTransactionViolations !== undefined) {
+        failureSnapshotData[violationsKey] = currentTransactionViolations;
+    }
+
+    if (canEditRemoveTransactionFromSearch(hash, pendingFields)) {
+        // This snapshot's query filters on a field this edit changed, so merging the new values in would leave a
+        // row that no longer matches the filter (the reported bug). There is no client-side matcher for arbitrary
+        // search filters — duplicating the server's filter semantics here would be fragile — so drop the row
+        // optimistically instead and let the next Search response re-add it if it still belongs.
+        optimisticSnapshotData[transactionKey] = null;
+        optimisticSnapshotData[violationsKey] = null;
+        // Leave the removal in place on success; the authoritative Search response is what restores it.
+        return {
+            optimisticData: [{onyxMethod: Onyx.METHOD.MERGE, key: snapshotKey, value: {data: optimisticSnapshotData}}],
+            successData: [],
+            failureData: [{onyxMethod: Onyx.METHOD.MERGE, key: snapshotKey, value: {data: failureSnapshotData}}],
+        };
+    }
+
     optimisticSnapshotData[transactionKey] = {...updatedTransaction, pendingFields};
     if (optimisticViolations !== undefined) {
         optimisticSnapshotData[violationsKey] = optimisticViolations;
     }
 
-    const successSnapshotData: NullishDeep<SearchResultDataType> = {};
     successSnapshotData[transactionKey] = {pendingFields: clearedPendingFields};
-
-    const failureSnapshotData: NullishDeep<SearchResultDataType> = {};
-    failureSnapshotData[transactionKey] = {...transaction, pendingFields: clearedPendingFields};
-    if (currentTransactionViolations !== undefined) {
-        failureSnapshotData[violationsKey] = currentTransactionViolations;
-    }
 
     return {
         optimisticData: [{onyxMethod: Onyx.METHOD.MERGE, key: snapshotKey, value: {data: optimisticSnapshotData}}],
