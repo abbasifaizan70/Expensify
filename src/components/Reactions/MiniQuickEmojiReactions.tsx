@@ -14,6 +14,7 @@ import useThemeStyles from '@hooks/useThemeStyles';
 
 import {getLocalizedEmojiName, getPreferredEmojiCode} from '@libs/EmojiUtils';
 import getButtonState from '@libs/getButtonState';
+import getHadTabNavigation from '@libs/hadTabNavigation';
 import mergeRefs from '@libs/mergeRefs';
 
 import variables from '@styles/variables';
@@ -26,7 +27,7 @@ import ONYXKEYS from '@src/ONYXKEYS';
 import type {ReportActionReactions} from '@src/types/onyx';
 import {getEmptyObject} from '@src/types/utils/EmptyObject';
 
-import React, {useCallback, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {View} from 'react-native';
 
 import type {BaseQuickEmojiReactionsProps} from './QuickEmojiReactions/types';
@@ -57,10 +58,14 @@ function MiniQuickEmojiReactions({reportAction, reportActionID, onEmojiSelected,
     const quickReactions = CONST.QUICK_REACTIONS.slice(0, 3);
 
     // This row mounts as soon as a report action is merely hovered (see ReportActionItem), not when it
-    // receives keyboard focus. Gate the arrow-key manager on the row actually holding focus so that hovering
-    // a message with the mouse can't hijack arrow keys elsewhere on the page (e.g. the composer's text
-    // cursor) - it only becomes active once the user has tabbed into one of this row's own buttons.
+    // receives keyboard focus, and a mouse click can land DOM focus on a button too - BaseMiniContextMenuItem
+    // only calls preventDefault() on mousedown while the composer is focused, and the pressable is
+    // tabIndex={0} on web. So the arrow-key manager is gated on both: a button in this row holds focus, and
+    // that focus arrived from the keyboard. Without the first condition, merely resting the mouse on a message
+    // would hijack arrow keys app-wide (including the composer's text cursor); without the second, a plain
+    // mouse click on a reaction would start arrow navigation across the row.
     const [isRowFocused, setIsRowFocused] = useState(false);
+    const [isKeyboardModality, setIsKeyboardModality] = useState(false);
 
     // Refs used to move real DOM focus onto the focused item, kept separate from `ref` above (the existing
     // popover anchor for the full emoji picker on the "add reaction" button) since a single ref can only
@@ -77,7 +82,7 @@ function MiniQuickEmojiReactions({reportAction, reportActionID, onEmojiSelected,
         initialFocusedIndex: -1,
         maxIndex: quickReactions.length,
         allowHorizontalArrowKeys: true,
-        isActive: isRowFocused,
+        isActive: isRowFocused && isKeyboardModality,
     });
 
     // Hooks must be called an unconditional, fixed number of times, so each item gets its own useSyncFocus
@@ -86,6 +91,34 @@ function MiniQuickEmojiReactions({reportAction, reportActionID, onEmojiSelected,
     useSyncFocus(secondQuickReactionRef, focusedIndex === 1);
     useSyncFocus(thirdQuickReactionRef, focusedIndex === 2);
     useSyncFocus(addReactionFocusRef, focusedIndex === quickReactions.length);
+
+    const onItemFocus = useCallback(
+        (index: number) => {
+            // hadTabNavigation's pointerdown/mousedown listeners are registered on document in the capture
+            // phase, so for a mouse click the flag is already false by the time this focus event fires.
+            // Focus that arrived from a click therefore never arms the arrow keys.
+            const isKeyboard = getHadTabNavigation();
+            setIsKeyboardModality(isKeyboard);
+            setIsRowFocused(true);
+            if (isKeyboard) {
+                setFocusedIndex(index);
+            }
+        },
+        [setFocusedIndex],
+    );
+
+    const onItemBlur = useCallback(() => setIsRowFocused(false), []);
+
+    // Clicking a button that is already keyboard-focused fires no new focus event, so onItemFocus alone would
+    // never see the modality flip. Disarm on pointerdown while the row is armed.
+    useEffect(() => {
+        if (!isRowFocused || !isKeyboardModality || typeof document === 'undefined') {
+            return;
+        }
+        const disarm = () => setIsKeyboardModality(false);
+        document.addEventListener('pointerdown', disarm, true);
+        return () => document.removeEventListener('pointerdown', disarm, true);
+    }, [isRowFocused, isKeyboardModality]);
 
     const selectEmojiWithReaction = useCallback(
         (emoji: Emoji, skinTone: number) => {
@@ -115,11 +148,8 @@ function MiniQuickEmojiReactions({reportAction, reportActionID, onEmojiSelected,
                     isDelayButtonStateComplete={false}
                     tooltipText={`:${getLocalizedEmojiName(emoji.name, preferredLocale)}:`}
                     onPress={callFunctionIfActionIsAllowed(() => onEmojiSelected(emoji, emojiReactions, preferredSkinTone))}
-                    onFocus={() => {
-                        setIsRowFocused(true);
-                        setFocusedIndex(index);
-                    }}
-                    onBlur={() => setIsRowFocused(false)}
+                    onFocus={() => onItemFocus(index)}
+                    onBlur={onItemBlur}
                     sentryLabel={CONST.SENTRY_LABEL.MINI_CONTEXT_MENU.QUICK_REACTION}
                 >
                     <Text
@@ -139,11 +169,8 @@ function MiniQuickEmojiReactions({reportAction, reportActionID, onEmojiSelected,
                         emojiPickerRef.current?.hideEmojiPicker();
                     }
                 })}
-                onFocus={() => {
-                    setIsRowFocused(true);
-                    setFocusedIndex(quickReactions.length);
-                }}
-                onBlur={() => setIsRowFocused(false)}
+                onFocus={() => onItemFocus(quickReactions.length)}
+                onBlur={onItemBlur}
                 isDelayButtonStateComplete={false}
                 tooltipText={translate('emojiReactions.addReactionTooltip')}
                 sentryLabel={CONST.SENTRY_LABEL.MINI_CONTEXT_MENU.EMOJI_PICKER_BUTTON}
