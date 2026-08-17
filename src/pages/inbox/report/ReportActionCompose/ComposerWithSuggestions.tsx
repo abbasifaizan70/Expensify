@@ -286,7 +286,7 @@ function ComposerWithSuggestions({
     });
 
     // Save the draft of the report action. This debounced so that we're not ceaselessly saving your edit.
-    const {saveDraft: debouncedSaveReportActionDraft, isSavePending: isDraftSavePending} = useDebouncedSaveDraft(saveReportActionDraft);
+    const {saveDraft: debouncedSaveReportActionDraft, isSavePending: isDraftSavePending, cancelSaveDraft: cancelSaveReportActionDraft} = useDebouncedSaveDraft(saveReportActionDraft);
 
     // Save the draft of the report comment. This debounced so that we're not ceaselessly saving your edit. Saving the draft
     // allows one to navigate somewhere else and come back to the comment and still have it in edit mode.
@@ -300,6 +300,18 @@ function ComposerWithSuggestions({
         undefined,
         true,
     );
+
+    // On narrow layouts editing happens in this persistent composer, which never unmounts when editing ends. A
+    // debounced report-action-draft save queued by a recent keystroke can therefore land *after* Save/Cancel has
+    // already cleared the draft, re-writing it and leaving the edited text sitting in the composer. Discard the
+    // pending save on the falling edge of `isEditing`, so it can never resurrect a draft that was just cleared.
+    const wasEditingRef = useRef(isEditing);
+    useEffect(() => {
+        if (wasEditingRef.current && !isEditing) {
+            cancelSaveReportActionDraft();
+        }
+        wasEditingRef.current = isEditing;
+    }, [isEditing, cancelSaveReportActionDraft]);
 
     useDraftMessageVideoAttributeCache({
         draftMessage: text,

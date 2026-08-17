@@ -9,6 +9,8 @@ import {useRef} from 'react';
 type UseDebouncedSaveDraftResult = {
     saveDraft: (...args: unknown[]) => void;
     isSavePending: RefObject<boolean>;
+    /** Discards a pending debounced save so a stale write can't land after the draft was intentionally cleared. */
+    cancelSaveDraft: () => void;
 };
 
 /**
@@ -32,9 +34,15 @@ function useDebouncedSaveDraftImpl(saveDraftFn: (...args: unknown[]) => void, wa
         debouncedSaveDraft(...args);
     };
 
+    const cancelSaveDraft = () => {
+        debouncedSaveDraft.cancel();
+        isSavePending.current = false;
+    };
+
     return {
         saveDraft,
         isSavePending,
+        cancelSaveDraft,
     };
 }
 
@@ -52,6 +60,7 @@ function useDebouncedSaveDraft<SaveDraftArgs extends unknown[]>(saveDraftFn: (..
     return useDebouncedSaveDraftImpl(saveDraftFn as (...args: unknown[]) => void, wait, shouldExecuteOnUnmount) as {
         saveDraft: (...args: SaveDraftArgs) => void;
         isSavePending: RefObject<boolean>;
+        cancelSaveDraft: () => void;
     };
 }
 
