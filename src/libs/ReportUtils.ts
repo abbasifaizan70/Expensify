@@ -13262,8 +13262,10 @@ function hasExportError(reportActions: OnyxEntry<ReportActions> | ReportAction[]
  * `getExportIntegrationActionFragments` uses to render the "started exporting this report to ..." message, so it covers both a manual export
  * (written optimistically by `exportToIntegration`) and the automatic export the backend starts once the report is paid.
  *
- * Actions that already carry errors are excluded on purpose: a rejected export keeps its `pendingAction` and only gets `errors` added to it,
- * so without this check the button would stay locked forever after a failure instead of allowing a retry.
+ * An export can finish in two ways, and both have to release this state or the button would stay locked and could never be retried:
+ * - the request is rejected, which leaves `pendingAction` in place and only adds `errors` to the action, so errored actions are excluded here.
+ * - the request is accepted and the export then fails inside the integration, which arrives as an unreconciled INTEGRATIONSMESSAGE rather than
+ *   as an error on the export action, so a result newer than the pending action means that export has already finished.
  */
 function isExportInProgress(reportActions: OnyxEntry<ReportActions> | ReportAction[]): boolean {
     if (!reportActions) {
@@ -13271,8 +13273,19 @@ function isExportInProgress(reportActions: OnyxEntry<ReportActions> | ReportActi
     }
 
     const reportActionList = Array.isArray(reportActions) ? reportActions : Object.values(reportActions);
+    const getNewestCreated = (actions: ReportAction[]) => actions.reduce((newest, action) => (action.created > newest ? action.created : newest), '');
 
-    return reportActionList.some((action) => isExportIntegrationAction(action) && action.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD && isEmptyObject(action.errors));
+    const startedAt = getNewestCreated(
+        reportActionList.filter((action) => isExportIntegrationAction(action) && action.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD && isEmptyObject(action.errors)),
+    );
+    if (!startedAt) {
+        return false;
+    }
+
+    // Reconciled integration messages are informational (the export was already recorded in the integration), so they do not end an export.
+    const finishedAt = getNewestCreated(reportActionList.filter((action) => isIntegrationMessageAction(action) && !getOriginalMessage(action)?.result?.reconciled));
+
+    return finishedAt < startedAt;
 }
 
 function doesReportContainRequestsFromMultipleUsers(iouReport: OnyxEntry<Report>, shouldExcludeDeletedTransactions = false): boolean {

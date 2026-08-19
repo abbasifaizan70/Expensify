@@ -22208,6 +22208,58 @@ describe('ReportUtils', () => {
             expect(isExportInProgress(reportActions)).toBe(false);
         });
 
+        it('returns false when an unreconciled integration message is newer than the pending export, so a failure inside the integration ends it', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.INTEGRATIONS_MESSAGE,
+                    reportActionID: '2',
+                    created: '2024-01-02',
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(false);
+        });
+
+        it('returns true when the pending export is newer than the last integration message, so a retry goes back to in progress', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.INTEGRATIONS_MESSAGE,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                },
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '2',
+                    created: '2024-01-02',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(true);
+        });
+
+        it('ignores reconciled integration messages, which are informational rather than a result', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.INTEGRATIONS_MESSAGE,
+                    reportActionID: '2',
+                    created: '2024-01-02',
+                    originalMessage: {result: {success: true, reconciled: true}},
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(true);
+        });
+
         it('returns false when there are no report actions', () => {
             expect(isExportInProgress(undefined)).toBe(false);
             expect(isExportInProgress([])).toBe(false);
