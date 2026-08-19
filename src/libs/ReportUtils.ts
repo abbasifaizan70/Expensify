@@ -13255,6 +13255,26 @@ function hasExportError(reportActions: OnyxEntry<ReportActions> | ReportAction[]
     return Object.values(reportActions).some((action) => isIntegrationMessageAction(action) && !getOriginalMessage(action)?.result?.reconciled);
 }
 
+/**
+ * Whether an export of this report to an accounting integration is currently in flight.
+ *
+ * An in-progress export is represented by an EXPORTINTEGRATION action that still carries `pendingAction: ADD`. That is the same signal
+ * `getExportIntegrationActionFragments` uses to render the "started exporting this report to ..." message, so it covers both a manual export
+ * (written optimistically by `exportToIntegration`) and the automatic export the backend starts once the report is paid.
+ *
+ * Actions that already carry errors are excluded on purpose: a rejected export keeps its `pendingAction` and only gets `errors` added to it,
+ * so without this check the button would stay locked forever after a failure instead of allowing a retry.
+ */
+function isExportInProgress(reportActions: OnyxEntry<ReportActions> | ReportAction[]): boolean {
+    if (!reportActions) {
+        return false;
+    }
+
+    const reportActionList = Array.isArray(reportActions) ? reportActions : Object.values(reportActions);
+
+    return reportActionList.some((action) => isExportIntegrationAction(action) && action.pendingAction === CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD && isEmptyObject(action.errors));
+}
+
 function doesReportContainRequestsFromMultipleUsers(iouReport: OnyxEntry<Report>, shouldExcludeDeletedTransactions = false): boolean {
     const transactions = getReportTransactions(iouReport?.reportID).filter(
         (transaction) => !shouldExcludeDeletedTransactions || transaction.pendingAction !== CONST.RED_BRICK_ROAD_PENDING_ACTION.DELETE,
@@ -14445,6 +14465,7 @@ export {
     canBeExported,
     isExported,
     hasExportError,
+    isExportInProgress,
     hasOnlyNonReimbursableTransactions,
     getReportLastMessage,
     getReportLastVisibleActionCreated,

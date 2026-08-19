@@ -175,6 +175,7 @@ import {
     isCurrentUserSubmitter,
     isCurrentUserTheOnlyParticipant,
     isDeprecatedGroupDM,
+    isExportInProgress,
     isGroupPolicyExpenseReport,
     isHarvestCreatedExpenseReport,
     isMoneyRequestReportEligibleForMerge,
@@ -22136,6 +22137,80 @@ describe('ReportUtils', () => {
                 },
             ]);
             expect(hasExportError(reportActions, report)).toBe(false);
+        });
+    });
+
+    describe('isExportInProgress', () => {
+        it('returns true while an export action is still pending', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(true);
+        });
+
+        it('returns false once the export action is no longer pending', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(false);
+        });
+
+        it('returns false when the pending export action carries errors, so a failed export can be retried', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                    errors: {'1708946640843000': 'Oops... something went wrong'},
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(false);
+        });
+
+        it('returns true when an earlier export failed and a new one is pending', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                    errors: {'1708946640843000': 'Oops... something went wrong'},
+                },
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.EXPORTED_TO_INTEGRATION,
+                    reportActionID: '2',
+                    created: '2024-01-02',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(true);
+        });
+
+        it('ignores pending actions of other types', () => {
+            const reportActions = createMock<ReportAction[]>([
+                {
+                    actionName: CONST.REPORT.ACTIONS.TYPE.INTEGRATIONS_MESSAGE,
+                    reportActionID: '1',
+                    created: '2024-01-01',
+                    pendingAction: CONST.RED_BRICK_ROAD_PENDING_ACTION.ADD,
+                },
+            ]);
+            expect(isExportInProgress(reportActions)).toBe(false);
+        });
+
+        it('returns false when there are no report actions', () => {
+            expect(isExportInProgress(undefined)).toBe(false);
+            expect(isExportInProgress([])).toBe(false);
         });
     });
 
