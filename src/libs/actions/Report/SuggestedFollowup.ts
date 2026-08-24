@@ -89,23 +89,9 @@ function resolveSuggestedFollowup(
     // If there's a pre-generated response, queue it for delayed display.
     const optimisticConciergeReportActionID = rand64();
 
-    // Use the full delay as createdOffset so the Concierge response timestamp is
-    // strictly after the user's comment — a 1ms offset was not enough to guarantee
-    // correct sort order when both actions are queued to Onyx near-simultaneously.
-    const optimisticConciergeAction = buildOptimisticAddCommentReportAction({
-        text: selectedFollowup.response,
-        actorAccountID: CONST.ACCOUNT_ID.CONCIERGE,
-        createdOffset: CONCIERGE_RESPONSE_DELAY_MS,
-        reportActionID: optimisticConciergeReportActionID,
-        reportID,
-        isHTML: true,
-        currentUserEmail,
-        currentUserAccountID,
-        delegateAccountIDParam: delegateAccountID,
-    });
-
-    // Post user's comment immediately
-    addComment({
+    // Post the user's question first so the reply can be positioned immediately after the
+    // timestamp chosen by the send path instead of reserving a slot four seconds in the future.
+    const conciergeReplyCreated = addComment({
         report,
         notifyReportID: notifyReportID ?? reportID,
         ancestors,
@@ -116,11 +102,26 @@ function resolveSuggestedFollowup(
         isInSidePanel: false,
         pregeneratedResponseParams: {
             optimisticConciergeReportActionID,
-            optimisticConciergeCreated: optimisticConciergeAction.reportAction.created,
             pregeneratedResponse: selectedFollowup.response,
         },
         delegateAccountID,
         conciergeReportID,
+    });
+
+    if (!conciergeReplyCreated) {
+        return;
+    }
+
+    const optimisticConciergeAction = buildOptimisticAddCommentReportAction({
+        text: selectedFollowup.response,
+        actorAccountID: CONST.ACCOUNT_ID.CONCIERGE,
+        created: conciergeReplyCreated,
+        reportActionID: optimisticConciergeReportActionID,
+        reportID,
+        isHTML: true,
+        currentUserEmail,
+        currentUserAccountID,
+        delegateAccountIDParam: delegateAccountID,
     });
 
     addOptimisticConciergeActionWithDelay(reportID, optimisticConciergeAction);

@@ -46,6 +46,8 @@ function useComposerSubmit(reportID: string) {
     const [conciergeReportID] = useOnyx(ONYXKEYS.CONCIERGE_REPORT_ID);
     const {isBetaEnabled} = usePermissions();
     const [isComposerFullSize = false] = useOnyx(`${ONYXKEYS.COLLECTION.REPORT_IS_COMPOSER_FULL_SIZE}${reportID}`);
+    const [pendingConciergeResponse] = useOnyx(`${ONYXKEYS.COLLECTION.PENDING_CONCIERGE_RESPONSE}${reportID}`);
+    const [pendingConciergeFollowupList] = useOnyx(`${ONYXKEYS.COLLECTION.CONCIERGE_PENDING_FOLLOWUP_LIST}${reportID}`);
     const delegateAccountID = useDelegateAccountID();
 
     const {composerRef, attachmentFileRef, textRef} = useComposerMeta();
@@ -80,11 +82,10 @@ function useComposerSubmit(reportID: string) {
             return;
         }
 
-        // A new user message supersedes any Concierge processing indicator from a prior turn (e.g. a persisted
-        // "...is working on your chat" while a human is handling it). Clear it optimistically so it disappears
-        // the instant the user sends, instead of lingering until the ProcessAgentZeroRequest job runs; the
-        // backend re-establishes the correct status afterward.
-        if (isConciergeChatReport(report, conciergeReportID)) {
+        // Keep the live processing indicator while a pre-generated turn is still reconciling. When no
+        // such turn exists, preserve the existing behavior of clearing stale state from a prior turn.
+        const hasPendingConciergeTurn = !!pendingConciergeResponse || !!pendingConciergeFollowupList;
+        if (isConciergeChatReport(report, conciergeReportID) && !hasPendingConciergeTurn) {
             clearAgentZeroProcessingIndicator(reportID, CONST.ACCOUNT_ID.CONCIERGE);
         }
 

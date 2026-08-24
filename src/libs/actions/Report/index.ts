@@ -79,7 +79,7 @@ import type {LinkToOptions} from '@libs/Navigation/helpers/linkTo/types';
 import {resetOnboardingStackToRoot} from '@libs/Navigation/helpers/OnboardingNavigationUtils';
 import Navigation from '@libs/Navigation/Navigation';
 import enhanceParameters from '@libs/Network/enhanceParameters';
-import {getDBTimeWithSkew, getIsOffline as isOfflineNetwork} from '@libs/NetworkState';
+import {getDBTimeWithSkew, getIsOffline as isOfflineNetwork, getServerAnchoredDBTime} from '@libs/NetworkState';
 import {buildOptimisticNextStep} from '@libs/NextStepUtils';
 import LocalNotification from '@libs/Notification/LocalNotification';
 import {rand64} from '@libs/NumberUtils';
@@ -398,7 +398,6 @@ type OpenReportActionParams = {
 
 type PregeneratedResponseParams = {
     optimisticConciergeReportActionID: string;
-    optimisticConciergeCreated: string;
     pregeneratedResponse: string;
 };
 
@@ -888,7 +887,7 @@ function addActions({
     delegateAccountID,
     conciergeReportID,
     conciergeThreadReportID,
-}: AddActionsParams) {
+}: AddActionsParams): string | undefined {
     if (!report?.reportID) {
         return;
     }
@@ -927,6 +926,11 @@ function addActions({
         reportCommentAction = reportComment.reportAction;
         reportCommentText = reportComment.commentText;
     }
+
+    // A pre-generated Concierge reply answers the comment being sent now, so it belongs one tick
+    // after that comment. The reveal delay is carried separately by `displayAfter` and must not
+    // leak into the conversational ordering through `created`.
+    const pregeneratedConciergeCreated = pregeneratedResponseParams ? getServerAnchoredDBTime(Date.now(), reportCommentAction?.created) : undefined;
 
     if (file) {
         // When we are adding an attachment we will call AddAttachment.
@@ -1053,7 +1057,6 @@ function addActions({
     // Add pregenerated params
     if (pregeneratedResponseParams) {
         parameters.optimisticConciergeReportActionID = pregeneratedResponseParams.optimisticConciergeReportActionID;
-        parameters.optimisticConciergeCreated = pregeneratedResponseParams.optimisticConciergeCreated;
         parameters.pregeneratedResponse = pregeneratedResponseParams.pregeneratedResponse;
     }
 
@@ -1273,6 +1276,8 @@ function addActions({
         Onyx.update(conciergeThreadOnyxData).then(() => Navigation.navigate(getReportRouteForCurrentContext({reportID: conciergeThreadReportID})));
     }
     notifyNewAction(resolvedNotifyReportID, lastAction, lastAction?.actorAccountID === currentUserAccountID);
+
+    return pregeneratedConciergeCreated;
 }
 
 /** Add an attachment with an optional comment to a report */
@@ -1360,11 +1365,11 @@ function addComment({
     delegateAccountID,
     conciergeReportID,
     conciergeThreadReportID,
-}: AddCommentParams) {
+}: AddCommentParams): string | undefined {
     if (shouldPlaySound) {
         playSound(SOUNDS.DONE);
     }
-    addActions({
+    return addActions({
         report,
         notifyReportID,
         ancestors,

@@ -6756,10 +6756,12 @@ describe('actions/Report', () => {
                 WRITE_COMMANDS.ADD_COMMENT,
                 expect.objectContaining({
                     optimisticConciergeReportActionID: pendingResponse?.reportAction.reportActionID,
-                    optimisticConciergeCreated: pendingResponse?.reportAction.created,
+                    pregeneratedResponse: 'To set up QuickBooks, go to Settings...',
                 }),
                 expect.anything(),
             );
+            const [, addCommentParams] = apiWriteSpy.mock.calls.find((call) => call.at(0) === WRITE_COMMANDS.ADD_COMMENT) ?? [];
+            expect(addCommentParams).not.toHaveProperty('optimisticConciergeCreated');
 
             // Verify the client did NOT set REPORT_USER_IS_TYPING. The server-owned
             // agentZeroProcessingIndicator is the source of truth for the "Concierge is thinking..."
@@ -6815,6 +6817,7 @@ describe('actions/Report', () => {
             expect(userCommentAction?.created).toBeDefined();
             expect(pendingResponse?.reportAction.created).toBeDefined();
             expect(new Date(pendingResponse?.reportAction.created ?? 0).getTime()).toBeGreaterThan(new Date(userCommentAction?.created ?? 0).getTime());
+            expect(new Date(pendingResponse?.reportAction.created ?? 0).getTime() - new Date(userCommentAction?.created ?? 0).getTime()).toBeLessThan(1000);
         });
 
         it('should emit Log.info followup_clicked telemetry when a suggested followup is resolved', async () => {
