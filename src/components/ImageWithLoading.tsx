@@ -13,6 +13,8 @@ import AttachmentOfflineIndicator from './AttachmentOfflineIndicator';
 import Image from './Image';
 import LoadingIndicator from './LoadingIndicator';
 
+const THUMBNAIL_FALLBACK_TIMEOUT_MS = 8000;
+
 type ImageWithSizeLoadingProps = {
     /** Any additional styles to apply */
     containerStyles?: StyleProp<ViewStyle>;
@@ -51,6 +53,8 @@ function ImageWithLoading({
     const isLoadedRef = useRef<boolean | null>(null);
     const [isImageCached, setIsImageCached] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
+    const [hasLoadingTimedOut, setHasLoadingTimedOut] = useState(false);
+    const [loadingAttempt, setLoadingAttempt] = useState(0);
     // The full-resolution image is not guaranteed to ever emit `onLoad`/`onError` (e.g. a receipt derivative that is
     // still being generated server-side), so `isLoading` can stay `true` indefinitely. Once the low-resolution preview
     // is on screen we have something readable to show, so the loading state must stop being visible at that point.
@@ -90,6 +94,16 @@ function ImageWithLoading({
         return () => clearTimeout(timeout);
     }, [isLoading]);
 
+    // Neither onLoad nor onError is guaranteed to ever fire for a derivative that is still being generated
+    // server-side, so bound how long the spinner can be shown instead of waiting on it indefinitely.
+    useEffect(() => {
+        if (!isLoading) {
+            return;
+        }
+        const timeout = delay(() => setHasLoadingTimedOut(true), THUMBNAIL_FALLBACK_TIMEOUT_MS);
+        return () => clearTimeout(timeout);
+    }, [isLoading, loadingAttempt]);
+
     return (
         <View
             style={[styles.w100, styles.h100, containerStyles]}
@@ -107,6 +121,7 @@ function ImageWithLoading({
                             setIsThumbnailLoading(false);
                             onLoad?.(e);
                         }}
+                        onError={() => setIsThumbnailLoading(false)}
                         loadingIconSize={loadingIconSize}
                         loadingIndicatorStyles={loadingIndicatorStyles}
                     />
@@ -120,6 +135,7 @@ function ImageWithLoading({
                     if (isLoadedRef.current ?? isLoading) {
                         return;
                     }
+                    setHasLoadingTimedOut(false);
                     setIsLoading(true);
                 }}
                 onError={handleError}
@@ -133,12 +149,14 @@ function ImageWithLoading({
                     setIsImageCached(false);
                     setIsLoading(true);
                     setIsThumbnailLoading(!!previewUri);
+                    setHasLoadingTimedOut(false);
+                    setLoadingAttempt((attempt) => attempt + 1);
                     waitForSession?.();
                 }}
                 loadingIconSize={loadingIconSize}
                 loadingIndicatorStyles={loadingIndicatorStyles}
             />
-            {isLoading && (!previewUri || isThumbnailLoading) && !isImageCached && !isOffline && (
+            {isLoading && (!previewUri || isThumbnailLoading) && !isImageCached && !isOffline && !hasLoadingTimedOut && (
                 <LoadingIndicator
                     iconSize={loadingIconSize}
                     style={[styles.opacity1, styles.bgTransparent, loadingIndicatorStyles]}
