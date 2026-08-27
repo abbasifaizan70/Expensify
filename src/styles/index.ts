@@ -4167,8 +4167,11 @@ const staticStyles = (theme: ThemeColors) =>
             borderRadius: variables.buttonBorderRadius,
         },
 
+        // buttonHoveredBG rather than hoverComponentBG: the report action row is already tinted with
+        // hoverComponentBG while the user is hovering it, so that shade would be invisible here. This is
+        // the same shade the emoji reaction bubbles in the same row use for their hover state.
         conciergeFeedbackButtonHovered: {
-            backgroundColor: theme.hoverComponentBG,
+            backgroundColor: theme.buttonHoveredBG,
         },
 
         widgetHeaderMenuButtonWrapper: {
