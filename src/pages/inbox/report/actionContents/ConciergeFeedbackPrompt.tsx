@@ -81,7 +81,7 @@ function ConciergeFeedbackPrompt({action, reportID}: ConciergeFeedbackPromptProp
         return (
             <ActionableItemButtons
                 layout="horizontal"
-                style={styles.alignItemsCenter}
+                style={[styles.alignItemsCenter, styles.gap1]}
             >
                 <Text style={[styles.textSupporting, styles.userSelectNone]}>{translate('conciergeFeedback.thanks')}</Text>
             </ActionableItemButtons>
@@ -97,11 +97,13 @@ function ConciergeFeedbackPrompt({action, reportID}: ConciergeFeedbackPromptProp
     return (
         <ActionableItemButtons
             layout="horizontal"
-            style={styles.alignItemsCenter}
+            style={[styles.alignItemsCenter, styles.gap1]}
         >
             <Text style={[styles.textSupporting, styles.userSelectNone]}>{translate('conciergeFeedback.prompt')}</Text>
             <PressableWithFeedback
                 onPress={() => react(THUMBS_UP_EMOJI, true)}
+                style={({hovered, pressed}) => [styles.conciergeFeedbackButton, (hovered || pressed) && styles.conciergeFeedbackButtonHovered]}
+                hoverDimmingValue={1}
                 role={CONST.ROLE.BUTTON}
                 accessibilityLabel={translate('conciergeFeedback.thumbsUp')}
                 sentryLabel={CONST.SENTRY_LABEL.CONCIERGE_FEEDBACK.THUMBS_UP}
@@ -113,6 +115,8 @@ function ConciergeFeedbackPrompt({action, reportID}: ConciergeFeedbackPromptProp
             </PressableWithFeedback>
             <PressableWithFeedback
                 onPress={() => react(THUMBS_DOWN_EMOJI, false)}
+                style={({hovered, pressed}) => [styles.conciergeFeedbackButton, (hovered || pressed) && styles.conciergeFeedbackButtonHovered]}
+                hoverDimmingValue={1}
                 role={CONST.ROLE.BUTTON}
                 accessibilityLabel={translate('conciergeFeedback.thumbsDown')}
                 sentryLabel={CONST.SENTRY_LABEL.CONCIERGE_FEEDBACK.THUMBS_DOWN}

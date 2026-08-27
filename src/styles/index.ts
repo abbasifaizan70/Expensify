@@ -4157,6 +4157,20 @@ const staticStyles = (theme: ThemeColors) =>
             backgroundColor: theme.hoverComponentBG,
         },
 
+        // Ghost-button treatment for the Concierge feedback thumbs: a transparent Small (28x28) hit area that
+        // fills with the hover background, matching the design system's ghost button.
+        conciergeFeedbackButton: {
+            width: variables.componentSizeSmall,
+            height: variables.componentSizeSmall,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: variables.buttonBorderRadius,
+        },
+
+        conciergeFeedbackButtonHovered: {
+            backgroundColor: theme.hoverComponentBG,
+        },
+
         widgetHeaderMenuButtonWrapper: {
             // The 40px ghost button overflows the header instead of growing it: these negative margins shrink its
             // vertical footprint to the title line-height so every card header keeps the same height. The matching
