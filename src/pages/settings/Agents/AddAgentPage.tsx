@@ -22,6 +22,7 @@ import {buildFileFromAvatarCropResult} from '@libs/AvatarCropUtils';
 import {AGENT_AVATARS} from '@libs/Avatars/AgentAvatarCatalog';
 import {isMobile} from '@libs/Browser';
 import getIsNarrowLayout from '@libs/getIsNarrowLayout';
+import getPlatform from '@libs/getPlatform';
 import Navigation from '@libs/Navigation/Navigation';
 import type {PlatformStackScreenProps} from '@libs/Navigation/PlatformStackNavigation/types';
 import type {SettingsNavigatorParamList} from '@libs/Navigation/types';
@@ -58,7 +59,11 @@ function AddAgentPageContent({route, template}: AddAgentPageContentProps) {
     const {translate} = useLocalize();
     const styles = useThemeStyles();
     const {windowWidth, windowHeight} = useWindowDimensions();
-    const shouldUseScrollableLayout = useIsInLandscapeMode() || (isMobile() && windowWidth > windowHeight);
+    // On native phones the keyboard covers roughly half the screen, and the non-scrollable portrait layout has no
+    // minimum height for the instructions input and no scroll view, so the field collapses behind the keyboard.
+    // Use the same bounded, scrollable layout that landscape already uses. Web/desktop keep the current layout.
+    const isNativePlatform = getPlatform() === CONST.PLATFORM.ANDROID || getPlatform() === CONST.PLATFORM.IOS;
+    const shouldUseScrollableLayout = useIsInLandscapeMode() || isNativePlatform || (isMobile() && windowWidth > windowHeight);
     const {accountID: ownerAccountID, login: ownerLogin, displayName} = useCurrentUserPersonalDetails();
     const defaultAgentName = template?.name ?? (displayName ? translate('addAgentPage.defaultAgentName', displayName) : undefined);
     const defaultPrompt = template?.prompt ?? translate('addAgentPage.defaultPrompt');

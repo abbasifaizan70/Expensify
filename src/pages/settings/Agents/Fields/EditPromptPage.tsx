@@ -13,6 +13,7 @@ import useOnyx from '@hooks/useOnyx';
 import useThemeStyles from '@hooks/useThemeStyles';
 
 import {updateAgentPrompt} from '@libs/actions/Agent';
+import getPlatform from '@libs/getPlatform';
 import Navigation from '@libs/Navigation/Navigation';
 import type {PlatformStackScreenProps} from '@libs/Navigation/PlatformStackNavigation/types';
 import type {SettingsNavigatorParamList} from '@libs/Navigation/types';
@@ -31,7 +32,11 @@ type EditPromptPageProps = PlatformStackScreenProps<SettingsNavigatorParamList, 
 function EditPromptPage({route}: EditPromptPageProps) {
     const {translate} = useLocalize();
     const styles = useThemeStyles();
-    const shouldUseScrollableLayout = useIsInLandscapeMode();
+    // On native phones the keyboard covers roughly half the screen, and the non-scrollable portrait layout has no
+    // minimum height for the instructions input and no scroll view, so the field collapses behind the keyboard.
+    // Use the same bounded, scrollable layout that landscape already uses. Web/desktop keep the current layout.
+    const isNativePlatform = getPlatform() === CONST.PLATFORM.ANDROID || getPlatform() === CONST.PLATFORM.IOS;
+    const shouldUseScrollableLayout = useIsInLandscapeMode() || isNativePlatform;
     const accountID = route.params.accountID;
     const [agentPrompt] = useOnyx(`${ONYXKEYS.COLLECTION.SHARED_NVP_AGENT_PROMPT}${accountID}`);
 
