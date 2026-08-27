@@ -48,6 +48,9 @@ type ReportActionsListItemRendererProps = {
     /** If this is the first visible report action */
     isFirstVisibleReportAction: boolean;
 
+    /** If this is the most recent Concierge-authored action in the report */
+    isLatestConciergeReportAction: boolean;
+
     /** If the thread divider line will be used */
     shouldUseThreadDividerLine?: boolean;
 
@@ -73,6 +76,7 @@ function ReportActionsListItemRenderer({
     linkedReportActionID = '',
     shouldDisplayReplyDivider,
     isFirstVisibleReportAction = false,
+    isLatestConciergeReportAction = false,
     shouldUseThreadDividerLine = false,
     shouldHighlight = false,
     parentReportActionForTransactionThread,
@@ -183,6 +187,7 @@ function ReportActionsListItemRenderer({
             displayAsGroup={displayAsGroup}
             shouldDisplayNewMarker={shouldDisplayNewMarker}
             isFirstVisibleReportAction={isFirstVisibleReportAction}
+            isLatestConciergeReportAction={isLatestConciergeReportAction}
             shouldUseThreadDividerLine={shouldUseThreadDividerLine}
             shouldHighlight={shouldHighlight}
             isHarvestCreatedExpenseReport={isHarvestCreatedExpenseReport}

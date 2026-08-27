@@ -110,6 +110,9 @@ type ActionContentRouterProps = {
     /** ReportAction draft message */
     draftMessage: string | undefined;
 
+    /** If this is the most recent Concierge-authored action in the report */
+    isLatestConciergeReportAction?: boolean;
+
     /** Whether the report action is a whisper */
     isWhisper: boolean;
 
@@ -150,6 +153,7 @@ function ActionContentRouter({
     reportID,
     displayAsGroup,
     draftMessage,
+    isLatestConciergeReportAction,
     isWhisper,
     hovered,
     isHidden,
@@ -540,6 +544,7 @@ function ActionContentRouter({
             originalReportID={originalReportID}
             displayAsGroup={displayAsGroup}
             draftMessage={draftMessage}
+            isLatestConciergeReportAction={isLatestConciergeReportAction}
             isHidden={isHidden}
             updateHiddenState={updateHiddenState}
             isOnSearch={isOnSearch}

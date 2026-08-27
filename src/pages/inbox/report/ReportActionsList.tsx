@@ -321,6 +321,10 @@ function ReportActionsListContent({reportID, onLayout}: ReportActionsListContent
 
     const firstVisibleReportActionID = getFirstVisibleReportActionID(sortedReportActions, isOffline);
 
+    // sortedVisibleReportActions is ordered newest-first, so the first Concierge-authored action in it is the
+    // latest one. The feedback prompt is only offered under that action, and ordering is only known here.
+    const latestConciergeReportActionID = sortedVisibleReportActions.find((reportAction) => reportAction.actorAccountID === CONST.ACCOUNT_ID.CONCIERGE)?.reportActionID;
+
     useFollowActionBadgeTarget({
         isProduction,
         reportID,
@@ -375,6 +379,7 @@ function ReportActionsListContent({reportID, onLayout}: ReportActionsListContent
                     shouldDisplayNewMarker={reportAction.reportActionID === unreadMarkerReportActionID}
                     shouldDisplayReplyDivider={renderedVisibleReportActions.length > 1}
                     isFirstVisibleReportAction={firstVisibleReportActionID === reportAction.reportActionID}
+                    isLatestConciergeReportAction={!!latestConciergeReportActionID && latestConciergeReportActionID === reportAction.reportActionID}
                     shouldUseThreadDividerLine={shouldUseThreadDividerLine}
                     isHarvestCreatedExpenseReport={isHarvestCreatedExpenseReportAction}
                     shouldDisableContextMenuForConciergeDraft={shouldDisableContextMenuForConciergeDraft}

@@ -9631,6 +9631,12 @@ Aggiungi altre regole di spesa per proteggere il flusso di cassa aziendale.`,
         copy: 'Copia URL',
         copied: 'Copiato!',
     },
+    conciergeFeedback: {
+        prompt: 'Questa risposta ti è stata utile?',
+        thanks: 'Grazie per il tuo feedback!',
+        thumbsUp: 'Sì, questa risposta è stata utile',
+        thumbsDown: 'No, questa risposta non è stata utile',
+    },
     moderation: {
         flagDescription: 'Tutti i messaggi contrassegnati verranno inviati a un moderatore per la revisione.',
         chooseAReason: 'Scegli un motivo per la segnalazione qui sotto:',

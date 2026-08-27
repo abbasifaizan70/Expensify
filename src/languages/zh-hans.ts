@@ -9247,6 +9247,12 @@ ${reportName}`,
         copy: '复制 URL',
         copied: '已复制！',
     },
+    conciergeFeedback: {
+        prompt: '这个回复有帮助吗？',
+        thanks: '感谢您的反馈！',
+        thumbsUp: '是的，这个回复有帮助',
+        thumbsDown: '不，这个回复没有帮助',
+    },
     moderation: {
         flagDescription: '所有被标记的消息都会发送给版主进行审核。',
         chooseAReason: '请选择下方的标记原因：',

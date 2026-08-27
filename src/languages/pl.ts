@@ -9625,6 +9625,12 @@ Dodaj więcej zasad wydatków, żeby chronić płynność finansową firmy.`,
         copy: 'Skopiuj URL',
         copied: 'Skopiowano!',
     },
+    conciergeFeedback: {
+        prompt: 'Czy ta odpowiedź była pomocna?',
+        thanks: 'Dziękujemy za opinię!',
+        thumbsUp: 'Tak, ta odpowiedź była pomocna',
+        thumbsDown: 'Nie, ta odpowiedź nie była pomocna',
+    },
     moderation: {
         flagDescription: 'Wszystkie oznaczone wiadomości zostaną wysłane do moderatora do weryfikacji.',
         chooseAReason: 'Wybierz poniższy powód zgłoszenia:',

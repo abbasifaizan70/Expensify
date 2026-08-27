@@ -9974,6 +9974,12 @@ ${reportName}`,
         share: 'Compartirlo con mi contador',
         nothing: 'Por ahora, nada',
     },
+    conciergeFeedback: {
+        prompt: '¿Te resultó útil esta respuesta?',
+        thanks: '¡Gracias por tus comentarios!',
+        thumbsUp: 'Sí, la respuesta fue útil',
+        thumbsDown: 'No, la respuesta no fue útil',
+    },
     moderation: {
         flagDescription: 'Todos los mensajes marcados se enviarán a un moderador para tu revisión.',
         chooseAReason: 'Elige abajo un motivo para reportarlo:',

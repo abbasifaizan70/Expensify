@@ -9791,6 +9791,12 @@ const translations = {
         copy: 'Copy URL',
         copied: 'Copied!',
     },
+    conciergeFeedback: {
+        prompt: 'Was that response useful?',
+        thanks: 'Thanks for the feedback!',
+        thumbsUp: 'Yes, that response was useful',
+        thumbsDown: 'No, that response was not useful',
+    },
     moderation: {
         flagDescription: 'All flagged messages will be sent to a moderator for review.',
         chooseAReason: 'Choose a reason for flagging below:',

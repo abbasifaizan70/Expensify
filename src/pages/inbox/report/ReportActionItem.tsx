@@ -139,6 +139,9 @@ type ReportActionItemProps = {
     /** If this is the first visible report action */
     isFirstVisibleReportAction: boolean;
 
+    /** If this is the most recent Concierge-authored action in the report */
+    isLatestConciergeReportAction?: boolean;
+
     /**
      * Is the action a thread's parent reportAction viewed from within the thread report?
      * It will be false if we're viewing the same parent report action from the report it belongs to rather than the thread.
@@ -176,6 +179,7 @@ function ReportActionItem({
     shouldHideThreadDividerLine = false,
     onPress = undefined,
     isFirstVisibleReportAction = false,
+    isLatestConciergeReportAction = false,
     isThreadReportParentAction = false,
     shouldUseThreadDividerLine = false,
     shouldDisplayContextMenu = true,
@@ -635,6 +639,7 @@ function ReportActionItem({
                                                                 iouReport={iouReport}
                                                                 displayAsGroup={displayAsGroup}
                                                                 draftMessage={draftMessage}
+                                                                isLatestConciergeReportAction={isLatestConciergeReportAction}
                                                                 isWhisper={isWhisper}
                                                                 hovered={isHoveredOrActive}
                                                                 isHidden={isHidden}

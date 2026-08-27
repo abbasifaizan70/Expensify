@@ -9599,6 +9599,12 @@ er bestedingsregels toe om de kasstroom van het bedrijf te beschermen.`,
         copy: 'URL kopiëren',
         copied: 'Gekopieerd!',
     },
+    conciergeFeedback: {
+        prompt: 'Was dit antwoord nuttig?',
+        thanks: 'Bedankt voor je feedback!',
+        thumbsUp: 'Ja, dit antwoord was nuttig',
+        thumbsDown: 'Nee, dit antwoord was niet nuttig',
+    },
     moderation: {
         flagDescription: 'Alle gemarkeerde berichten worden ter beoordeling naar een moderator gestuurd.',
         chooseAReason: 'Kies hieronder een reden om te markeren:',

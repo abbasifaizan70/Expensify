@@ -9694,6 +9694,12 @@ Ajoutez davantage de règles de dépenses pour protéger la trésorerie de l’e
         copy: 'Copier l’URL',
         copied: 'Copié !',
     },
+    conciergeFeedback: {
+        prompt: 'Cette réponse vous a-t-elle été utile ?',
+        thanks: 'Merci pour votre retour !',
+        thumbsUp: 'Oui, cette réponse a été utile',
+        thumbsDown: 'Non, cette réponse n’a pas été utile',
+    },
     moderation: {
         flagDescription: 'Tous les messages signalés seront envoyés à un modérateur pour examen.',
         chooseAReason: 'Choisissez une raison de signalement ci-dessous :',

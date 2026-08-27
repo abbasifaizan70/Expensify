@@ -9596,6 +9596,12 @@ Adicione mais regras de gasto para proteger o fluxo de caixa da empresa.`,
         copy: 'Copiar URL',
         copied: 'Copiado!',
     },
+    conciergeFeedback: {
+        prompt: 'Essa resposta foi útil?',
+        thanks: 'Obrigado pelo feedback!',
+        thumbsUp: 'Sim, essa resposta foi útil',
+        thumbsDown: 'Não, essa resposta não foi útil',
+    },
     moderation: {
         flagDescription: 'Todas as mensagens sinalizadas serão enviadas a um moderador para revisão.',
         chooseAReason: 'Escolha um motivo para sinalizar abaixo:',

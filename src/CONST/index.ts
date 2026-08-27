@@ -2692,6 +2692,12 @@ const CONST = {
     EMOJI_NUM_PER_ROW: 8,
 
     EMOJI_DEFAULT_SKIN_TONE: -1,
+
+    /** Emoji names used by the Concierge feedback prompt, matching the keys in the emoji name table */
+    EMOJI_REACTION_NAME: {
+        THUMBS_UP: '+1',
+        THUMBS_DOWN: '-1',
+    },
     DISPLAY_PARTICIPANTS_LIMIT: 5,
 
     // Amount of emojis to render ahead at the end of the update cycle
@@ -8911,6 +8917,10 @@ const CONST = {
         EMOJI_REACTIONS: {
             REACTION_BUBBLE: 'EmojiReactions-ReactionBubble',
             ADD_REACTION_BUBBLE: 'EmojiReactions-AddReactionBubble',
+        },
+        CONCIERGE_FEEDBACK: {
+            THUMBS_UP: 'ConciergeFeedback-ThumbsUp',
+            THUMBS_DOWN: 'ConciergeFeedback-ThumbsDown',
         },
         MINI_CONTEXT_MENU: {
             QUICK_REACTION: 'MiniContextMenu-QuickReaction',

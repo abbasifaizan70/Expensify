@@ -30,6 +30,7 @@ import React from 'react';
 import {View} from 'react-native';
 
 import ChatActionableButtons from './ChatActionableButtons';
+import ConciergeFeedbackPrompt from './ConciergeFeedbackPrompt';
 
 type ChatMessageContentProps = {
     action: OnyxTypes.ReportAction;
@@ -38,12 +39,24 @@ type ChatMessageContentProps = {
     originalReportID?: string;
     displayAsGroup: boolean;
     draftMessage: string | undefined;
+    isLatestConciergeReportAction?: boolean;
     isHidden: boolean;
     updateHiddenState: (isHiddenValue: boolean) => void;
     isOnSearch: boolean;
 };
 
-function ChatMessageContent({action, policyID, reportID, originalReportID, displayAsGroup, draftMessage, isHidden, updateHiddenState, isOnSearch}: ChatMessageContentProps) {
+function ChatMessageContent({
+    action,
+    policyID,
+    reportID,
+    originalReportID,
+    displayAsGroup,
+    draftMessage,
+    isLatestConciergeReportAction,
+    isHidden,
+    updateHiddenState,
+    isOnSearch,
+}: ChatMessageContentProps) {
     const {translate} = useLocalize();
     const styles = useThemeStyles();
 
@@ -67,6 +80,10 @@ function ChatMessageContent({action, policyID, reportID, originalReportID, displ
         isActionableTrackExpense(action) ||
         !!(messageHtml && parseFollowupsFromHtml(messageHtml)?.length) ||
         hasPendingFollowupListSkeleton;
+
+    // The feedback prompt only belongs under the newest Concierge-authored message. Whether the user has
+    // already reacted is checked inside the prompt itself, since that lives in the reactions Onyx key.
+    const shouldShowConciergeFeedbackPrompt = !isOnSearch && !!isLatestConciergeReportAction && action.actorAccountID === CONST.ACCOUNT_ID.CONCIERGE && !isHidden;
 
     return (
         <MentionReportContext.Provider value={mentionReportContextValue}>
@@ -102,6 +119,12 @@ function ChatMessageContent({action, policyID, reportID, originalReportID, displ
                                     {isHidden ? translate('moderation.revealMessage') : translate('moderation.hideMessage')}
                                 </Text>
                             </Button>
+                        )}
+                        {shouldShowConciergeFeedbackPrompt && (
+                            <ConciergeFeedbackPrompt
+                                action={action}
+                                reportID={reportID}
+                            />
                         )}
                         {mayHaveActionableButtons && (
                             <ChatActionableButtons

@@ -9662,6 +9662,12 @@ Fügen Sie weitere Ausgabelimits hinzu, um den Cashflow Ihres Unternehmens zu sc
         copy: 'URL kopieren',
         copied: 'Kopiert!',
     },
+    conciergeFeedback: {
+        prompt: 'War diese Antwort hilfreich?',
+        thanks: 'Danke für dein Feedback!',
+        thumbsUp: 'Ja, diese Antwort war hilfreich',
+        thumbsDown: 'Nein, diese Antwort war nicht hilfreich',
+    },
     moderation: {
         flagDescription: 'Alle markierten Nachrichten werden zur Überprüfung an eine Moderation gesendet.',
         chooseAReason: 'Wähle unten einen Grund für die Meldung aus:',

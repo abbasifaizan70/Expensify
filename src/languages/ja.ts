@@ -9497,6 +9497,12 @@ ${reportName}`,
         copy: 'URLをコピー',
         copied: 'コピーしました！',
     },
+    conciergeFeedback: {
+        prompt: 'この回答は役に立ちましたか？',
+        thanks: 'フィードバックありがとうございます！',
+        thumbsUp: 'はい、この回答は役に立ちました',
+        thumbsDown: 'いいえ、この回答は役に立ちませんでした',
+    },
     moderation: {
         flagDescription: 'フラグが付けられたすべてのメッセージは、モデレーターに送信されて確認されます。',
         chooseAReason: '通報する理由を下から選択してください:',
