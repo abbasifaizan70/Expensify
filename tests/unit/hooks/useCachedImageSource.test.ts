@@ -1,4 +1,4 @@
-import {renderHook, waitFor} from '@testing-library/react-native';
+import {act, renderHook, waitFor} from '@testing-library/react-native';
 
 import useCachedImageSource from '@hooks/useCachedImageSource';
 
@@ -11,6 +11,8 @@ import createMock from '../../utils/createMock';
 const MOCK_URI = 'https://example.com/image.png';
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const MOCK_HEADERS = {'X-Auth-Token': 'token123'};
+// eslint-disable-next-line @typescript-eslint/naming-convention
+const MOCK_REFRESHED_HEADERS = {'X-Auth-Token': 'token456'};
 const MOCK_BLOB = new Blob(['image-data'], {type: 'image/png'});
 const MOCK_BLOB_URL = 'blob:http://localhost/mock-blob-url';
 
@@ -183,5 +185,50 @@ describe('useCachedImageSource', () => {
 
         // Old URL should be revoked during cleanup
         expect(mockRevokeObjectURL).toHaveBeenCalledWith(MOCK_BLOB_URL);
+    });
+
+    it('should not restart the cache fetch when the headers object is rebuilt with the same values', async () => {
+        let resolveFetch: (response: Response) => void = () => {};
+        jest.spyOn(global, 'fetch').mockImplementation(
+            () =>
+                new Promise<Response>((resolve) => {
+                    resolveFetch = resolve;
+                }),
+        );
+
+        const {result, rerender} = renderHook(({source}: {source: ImageSource}) => useCachedImageSource(source), {initialProps: {source: {uri: MOCK_URI, headers: {...MOCK_HEADERS}}}});
+
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+        });
+
+        // `getImageSource` builds a brand-new headers object on every render, so this is what the hook receives
+        // whenever the parent re-renders. Restarting the effect here would reset the state to `null` and abandon the
+        // request that is already in flight, leaving expo-image without a source to load.
+        rerender({source: {uri: MOCK_URI, headers: {...MOCK_HEADERS}}});
+
+        act(() => {
+            resolveFetch(createMockResponse());
+        });
+
+        await waitFor(() => {
+            expect(result.current).toEqual({uri: MOCK_BLOB_URL});
+        });
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should re-fetch when the header values change', async () => {
+        const {rerender} = renderHook(({source}: {source: ImageSource}) => useCachedImageSource(source), {initialProps: {source: {uri: MOCK_URI, headers: MOCK_HEADERS}}});
+
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenCalledWith(MOCK_URI, {headers: MOCK_HEADERS});
+        });
+
+        rerender({source: {uri: MOCK_URI, headers: MOCK_REFRESHED_HEADERS}});
+
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenCalledWith(MOCK_URI, {headers: MOCK_REFRESHED_HEADERS});
+        });
     });
 });

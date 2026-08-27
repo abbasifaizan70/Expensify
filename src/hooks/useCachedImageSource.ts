@@ -21,6 +21,10 @@ const clearAuthImagesCache = async () => {
 function useCachedImageSource(source: ImageSource | undefined): ImageSource | null | undefined {
     const uri = typeof source === 'object' ? source.uri : undefined;
     const hasHeaders = typeof source === 'object' && !!source.headers;
+    // `Image` rebuilds the `headers` object on every render (see `getImageSource`), so a new object arrives here even
+    // when the request is unchanged. Tracking the header *values* keeps the effect below tied to what actually decides
+    // the request, instead of restarting it on every re-render of the parent.
+    const headersKey = typeof source === 'object' && source.headers ? JSON.stringify(source.headers) : undefined;
     const [cachedUri, setCachedUri] = useState<string | null>(null);
     const [hasError, setHasError] = useState(false);
 
@@ -86,7 +90,13 @@ function useCachedImageSource(source: ImageSource | undefined): ImageSource | nu
                 URL.revokeObjectURL(objectURL);
             }
         };
-    }, [uri, hasHeaders, source?.headers]);
+        // `source.headers` is read above but deliberately left out of the dependencies: it is a fresh object on every
+        // render, and restarting this effect resets `cachedUri` to `null` and lets the cleanup abandon the in-flight
+        // fetch, so a blob URL is never produced. expo-image is then handed `null` forever and can emit neither
+        // `onLoad` nor `onError` — which is what leaves a receipt on an endless spinner. `headersKey` covers every
+        // header change that matters.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [uri, hasHeaders, headersKey]);
 
     // Images without headers are cached natively by the browser,
     // so pass them through as-is — no Cache API needed
