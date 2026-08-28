@@ -1,11 +1,12 @@
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
+import useDefaultExpensePolicy from '@hooks/useDefaultExpensePolicy';
 import useOnyx from '@hooks/useOnyx';
-import usePreferredPolicy from '@hooks/usePreferredPolicy';
 
 import {clearMoneyRequest} from '@libs/actions/IOU/MoneyRequest';
 import {saveUnknownUserDetails} from '@libs/actions/Share';
 import Navigation from '@libs/Navigation/Navigation';
 import {getPolicyExpenseChat} from '@libs/ReportUtils';
+import {shouldRestrictUserBillableActions} from '@libs/SubscriptionUtils';
 import {cancelSpan, getSpan, startSpan} from '@libs/telemetry/activeSpans';
 
 import MoneyRequestParticipantsSelector from '@pages/iou/request/MoneyRequestParticipantsSelector';
@@ -30,13 +31,23 @@ function ShareTabParticipantsSelectorComponent({detailsPageRouteObject}: ShareTa
 
     const isSubmitFlow = detailsPageRouteObject === ROUTES.SHARE_SUBMIT_DETAILS;
 
-    const {isRestrictedToPreferredPolicy, preferredPolicyID} = usePreferredPolicy();
+    const defaultExpensePolicy = useDefaultExpensePolicy();
+    const [amountOwed] = useOnyx(ONYXKEYS.NVP_PRIVATE_AMOUNT_OWED);
+    const [userBillingGracePeriodEnds] = useOnyx(ONYXKEYS.COLLECTION.SHARED_NVP_PRIVATE_USER_BILLING_GRACE_PERIOD_END);
+    const [ownerBillingGracePeriodEnd] = useOnyx(ONYXKEYS.NVP_PRIVATE_OWNER_BILLING_GRACE_PERIOD_END);
 
-    // When the user's domain security group restricts submission to a single workspace, skip the participant picker and
-    // go straight to confirmation for the locked workspace's expense chat, matching the in-product submit flow. Falls back
-    // to the picker if the locked policy's expense chat isn't in Onyx yet, so we never navigate to an empty report.
-    const lockedExpenseChatReportID =
-        isSubmitFlow && isRestrictedToPreferredPolicy && preferredPolicyID ? getPolicyExpenseChat(currentUserAccountID, preferredPolicyID)?.reportID : undefined;
+    // Mirrors the in-product Create-expense flow (see NavigateGlobalCreateContext + shouldUseDefaultExpensePolicy):
+    // auto-select the user's default group workspace, which useDefaultExpensePolicy resolves in the same priority order
+    // the mainline flow uses - the domain-restricted preferred policy first, then the active policy, then the user's
+    // only group workspace. Billing-restricted users are excluded so we never route them into a workspace they can no
+    // longer submit to.
+    const canAutoSelectDefaultPolicy =
+        !!defaultExpensePolicy && !shouldRestrictUserBillableActions(defaultExpensePolicy, ownerBillingGracePeriodEnd, userBillingGracePeriodEnds, amountOwed, currentUserAccountID);
+
+    // Skip the participant picker and go straight to confirmation for the default workspace's expense chat, matching the
+    // in-product submit flow. Falls back to the picker if that policy's expense chat isn't in Onyx yet, so we never
+    // navigate to an empty report.
+    const lockedExpenseChatReportID = isSubmitFlow && canAutoSelectDefaultPolicy ? getPolicyExpenseChat(currentUserAccountID, defaultExpensePolicy?.id)?.reportID : undefined;
 
     // Synchronous one-shot guard for the auto-navigation effect. A ref (rather than the render state below) is used so
     // the guard flips immediately: clearing the draft transaction mutates draftTransactionIDs, which re-runs the effect
@@ -58,8 +69,8 @@ function ShareTabParticipantsSelectorComponent({detailsPageRouteObject}: ShareTa
         [isSubmitFlow],
     );
 
-    // One-shot: auto-navigate the restricted user straight to the locked workspace's confirmation the first time the
-    // locked report resolves. The hasAutoNavigatedRef guard keeps this from re-running (and re-navigating) if
+    // One-shot: auto-navigate the user straight to the default workspace's confirmation the first time the
+    // auto-selected report resolves. The hasAutoNavigatedRef guard keeps this from re-running (and re-navigating) if
     // draftTransactionIDs later changes, while still keeping every captured value in the dependency array so we clear
     // the up-to-date drafts at navigation time and no dependency lint has to be suppressed.
     useEffect(() => {
@@ -90,9 +101,9 @@ function ShareTabParticipantsSelectorComponent({detailsPageRouteObject}: ShareTa
     }, [lockedExpenseChatReportID, draftTransactionIDs, detailsPageRouteObject]);
 
     // Render null only until the auto-navigation has run, to avoid flashing the full picker while we route the
-    // restricted user to the locked workspace. Afterwards we fall through to the picker so that backing out of the
-    // details page shows a usable screen (still limited to the locked workspace by the option-list filter) instead of
-    // a blank tab.
+    // user to the auto-selected workspace. Afterwards we fall through to the picker so that backing out of the
+    // details page shows a usable screen (still limited to the locked workspace by the option-list filter for
+    // domain-restricted users) instead of a blank tab.
     if (lockedExpenseChatReportID && !hasAutoNavigatedToLockedReport) {
         return null;
     }
