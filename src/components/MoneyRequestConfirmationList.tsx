@@ -81,6 +81,11 @@ type MoneyRequestConfirmationListProps = {
     /** Whether the parent-owned participant picker modal is currently open (new manual expense flow). Drives amount autofocus on picker close. */
     isParticipantPickerVisible?: boolean;
 
+    /** When true, the To section stays editable for a transaction that was not started from global create (e.g. the
+     * Share submit flow, which auto-selects the default workspace and owns its own participant picker). Tapping To
+     * then calls onOpenParticipantPicker. Domain-restricted users remain locked regardless. */
+    shouldAllowParticipantEdit?: boolean;
+
     /** Callback to parent modal to pay someone */
     onSendMoney?: (paymentMethod: PaymentMethodType | undefined) => void;
 
@@ -186,6 +191,7 @@ function MoneyRequestConfirmationList({
     onConfirm,
     onOpenParticipantPicker,
     isParticipantPickerVisible = false,
+    shouldAllowParticipantEdit = false,
     iouType = CONST.IOU.TYPE.SUBMIT,
     isOdometerDistanceRequest = false,
     isLoadingReceipt = false,
@@ -435,7 +441,7 @@ function MoneyRequestConfirmationList({
         currentUserAccountID: currentUserPersonalDetails.accountID,
     });
 
-    const canEditParticipant = isFromGlobalCreateAndCanEditParticipant && !isTestReceipt && (!isRestrictedToPreferredPolicy || isTypeInvoice);
+    const canEditParticipant = (isFromGlobalCreateAndCanEditParticipant || shouldAllowParticipantEdit) && !isTestReceipt && (!isRestrictedToPreferredPolicy || isTypeInvoice);
 
     const sections = useConfirmationSections({
         isTypeSplit,
@@ -458,7 +464,9 @@ function MoneyRequestConfirmationList({
             return;
         }
 
-        if (isNewManualExpenseFlowEnabled) {
+        // The Share submit flow (shouldAllowParticipantEdit) owns its participant picker the same way the new manual
+        // expense flow does, so route the tap to the parent-provided handler instead of the money-request step.
+        if (isNewManualExpenseFlowEnabled || shouldAllowParticipantEdit) {
             onOpenParticipantPicker?.();
             return;
         }

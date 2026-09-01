@@ -679,6 +679,11 @@ function SubmitDetailsPage({
                         receiptPath={currentReceiptSource}
                         receiptFilename={currentReceiptName}
                         reportID={reportOrAccountID}
+                        shouldAllowParticipantEdit
+                        onOpenParticipantPicker={() => {
+                            cleanupPreMount();
+                            Navigation.goBack();
+                        }}
                         shouldShowSmartScanFields={false}
                         shouldDisplayReceipt
                         isReceiptEditable
