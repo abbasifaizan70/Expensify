@@ -64,14 +64,19 @@ function getLastFullReconnectTimeToRecord(serverReconnectCutoff: string): string
  * array order: true today because both keys are cache-resident (see subscribeToFullReconnect.ts),
  * and pinned by the SubscribeToFullReconnect e2e test. If it ever broke, the worst case is one
  * transient extra reconnect, never a loop.
+ *
+ * Returns the recorded time so the caller can also apply it on an immediate pipe: a write command's
+ * response.onyxData only lands when the sequential queue drains (see RecordFullReconnectTime middleware).
  */
-function recordFullReconnectTimeFromResponse(responseOnyxData: AnyOnyxUpdate[], knownServerReconnectCutoff: string): void {
+function recordFullReconnectTimeFromResponse(responseOnyxData: AnyOnyxUpdate[], knownServerReconnectCutoff: string): string {
     const cutoffIndex = responseOnyxData.findIndex((update) => update.key === ONYXKEYS.NVP_RECONNECT_APP_IF_FULL_RECONNECT_BEFORE);
     const deliveredCutoffValue: unknown = cutoffIndex === -1 ? undefined : responseOnyxData.at(cutoffIndex)?.value;
     const deliveredCutoff = typeof deliveredCutoffValue === 'string' ? deliveredCutoffValue : '';
     const cutoffToSatisfy = deliveredCutoff > knownServerReconnectCutoff ? deliveredCutoff : knownServerReconnectCutoff;
     const insertionIndex = cutoffIndex === -1 ? responseOnyxData.length : cutoffIndex;
-    responseOnyxData.splice(insertionIndex, 0, {onyxMethod: Onyx.METHOD.MERGE, key: ONYXKEYS.LAST_FULL_RECONNECT_TIME, value: getLastFullReconnectTimeToRecord(cutoffToSatisfy)});
+    const recordedTime = getLastFullReconnectTimeToRecord(cutoffToSatisfy);
+    responseOnyxData.splice(insertionIndex, 0, {onyxMethod: Onyx.METHOD.MERGE, key: ONYXKEYS.LAST_FULL_RECONNECT_TIME, value: recordedTime});
+    return recordedTime;
 }
 
 export {shouldTriggerFullReconnect, getLastFullReconnectTimeToRecord, getServerReconnectCutoff, recordFullReconnectTimeFromResponse};

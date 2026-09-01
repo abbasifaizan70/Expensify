@@ -27,6 +27,8 @@ const mockOpenAppWriteCommand = jest.mocked(writeWithNoDuplicatesOpenAppConflict
 const CLIENT_NOW = '2026-06-12 10:00:00.000';
 const SERVER_CUTOFF = '2026-06-12 10:05:00.000';
 const NEWER_SERVER_CUTOFF = '2026-06-12 10:10:00.000';
+// Before CLIENT_NOW - models the measured case in #97159, where the cutoff predated the boot by days.
+const OLD_SERVER_CUTOFF = '2026-06-12 09:00:00.000';
 
 // Ordered log of two things: when we record the completion time (via the Onyx subscription below) and
 // when a reconnect request is sent (via the API mock). Lets tests assert we record before we request.
@@ -247,5 +249,34 @@ describe('subscribeToFullReconnect', () => {
 
         expect(capturedCommands).toHaveLength(0);
         expect(await getOnyxValue(ONYXKEYS.LAST_FULL_RECONNECT_TIME)).toBe(CLIENT_NOW);
+    });
+
+    it('does not fire a duplicate full download when a cutoff becomes visible during the initial OpenApp window', async () => {
+        // Fresh client: nothing recorded yet, and the app has not loaded - on a cold boot HAS_LOADED_APP's
+        // `true` is parked in queueFlushedData until the sequential queue drains, so reconnectApp reads it as unset.
+        await Onyx.merge(ONYXKEYS.HAS_LOADED_APP, false);
+        await waitForBatchedUpdates();
+
+        openApp();
+        await waitForCondition(() => getOpenAppRequestIndex() > -1, 'the boot OpenApp request');
+        // Production applies a write's optimisticData when the request is dispatched; the API mock only records it.
+        await Onyx.update(capturedOnyxData.at(getOpenAppRequestIndex())?.optimisticData ?? []);
+        await waitForBatchedUpdates();
+
+        // The cutoff reaches Onyx on an immediate pipe (a read command's response, a Pusher update) while the
+        // OpenApp response's spliced record is still queued behind the flush. The value models the measured
+        // case in #97159: a cutoff at or before the client's clock.
+        await Onyx.merge(ONYXKEYS.NVP_RECONNECT_APP_IF_FULL_RECONNECT_BEFORE, OLD_SERVER_CUTOFF);
+        // Generous flush: the failure path crosses several promise hops (cutoff subscription -> chained
+        // LAST_FULL_RECONNECT_TIME read -> triggerFullReconnect's merge -> reconnectApp -> hasLoadedAppPromise).
+        for (let i = 0; i < 8; i++) {
+            // eslint-disable-next-line no-await-in-loop
+            await waitForBatchedUpdates();
+        }
+
+        // Without the dispatch-time record in getOnyxDataForOpenOrReconnect, subscribeToFullReconnect fires,
+        // reconnectApp downgrades (hasLoadedApp unset) and a second OpenApp goes out - the duplicate behind #97159.
+        expect(capturedCommands.filter((command) => command === WRITE_COMMANDS.OPEN_APP)).toHaveLength(1);
+        expect(getReconnectRequests()).toHaveLength(0);
     });
 });

@@ -4,7 +4,7 @@ import * as API from '@libs/API';
 import type {GetMissingOnyxMessagesParams, HandleRestrictedEventParams, OpenAppParams, ReconnectAppParams, UpdatePreferredLocaleParams} from '@libs/API/parameters';
 import {READ_COMMANDS, SIDE_EFFECT_REQUEST_COMMANDS, WRITE_COMMANDS} from '@libs/API/types';
 import clearWorkboxRecoveryCaches from '@libs/clearWorkboxRecoveryCaches';
-import {getLastFullReconnectTimeToRecord} from '@libs/FullReconnectUtils';
+import {getLastFullReconnectTimeToRecord, getServerReconnectCutoff} from '@libs/FullReconnectUtils';
 import Log from '@libs/Log';
 import getCurrentUrl from '@libs/Navigation/currentUrl';
 import willRouteNavigateToRHP from '@libs/Navigation/helpers/willRouteNavigateToRHP';
@@ -299,7 +299,12 @@ function getPolicyParamsForOpenOrReconnect(): PolicyParamsForOpenOrReconnect {
     return {policyIDList: getNonOptimisticPolicyIDs(allPolicies)};
 }
 
-type OnyxDataForOpenOrReconnectKeys = typeof ONYXKEYS.COLLECTION.REPORT | typeof ONYXKEYS.IS_LOADING_REPORT_DATA | typeof ONYXKEYS.HAS_LOADED_APP | typeof ONYXKEYS.IS_LOADING_APP;
+type OnyxDataForOpenOrReconnectKeys =
+    | typeof ONYXKEYS.COLLECTION.REPORT
+    | typeof ONYXKEYS.IS_LOADING_REPORT_DATA
+    | typeof ONYXKEYS.HAS_LOADED_APP
+    | typeof ONYXKEYS.IS_LOADING_APP
+    | typeof ONYXKEYS.LAST_FULL_RECONNECT_TIME;
 
 /**
  * Returns the Onyx data that is used for both the OpenApp and ReconnectApp API commands.
@@ -351,6 +356,23 @@ function getOnyxDataForOpenOrReconnect(
             onyxMethod: Onyx.METHOD.MERGE,
             key: ONYXKEYS.IS_LOADING_APP,
             value: true,
+        });
+    }
+
+    // A full download satisfies the server's reconnect cutoff, so record LAST_FULL_RECONNECT_TIME when the
+    // request is dispatched, not only when its response lands. The response-time record is spliced into
+    // response.onyxData (RecordFullReconnectTime middleware), and for write commands that rides QueuedOnyxUpdates
+    // until the sequential queue drains - while the cutoff NVP can reach Onyx on immediate pipes (a read
+    // command's response, a Pusher update). A cutoff that becomes visible inside that window is compared against
+    // a stale or empty record, fires an unnecessary full ReconnectApp, and - HAS_LOADED_APP being parked in
+    // queueFlushedData above - downgrades into a duplicated OpenApp that replaces report_/reportActions_/
+    // transactions_ mid-view. Recording at dispatch is the same record-before-send pattern as
+    // triggerFullReconnect and clearOnyxAndSeedFullReconnect. See https://github.com/Expensify/App/issues/97159.
+    if (isOpenApp || isFullReconnect) {
+        result.optimisticData?.push({
+            onyxMethod: Onyx.METHOD.MERGE,
+            key: ONYXKEYS.LAST_FULL_RECONNECT_TIME,
+            value: getLastFullReconnectTimeToRecord(getServerReconnectCutoff()),
         });
     }
 
