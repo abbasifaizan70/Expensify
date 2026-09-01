@@ -841,13 +841,30 @@ function Search({
         }
     }, [hasErrors, queryJSON, searchResults, shouldResetSearchQuery, setShouldResetSearchQuery]);
 
+    // On a to-do search every matching row is rendered from live Onyx on the first pass, so `allDataLength`
+    // starts at the full count instead of growing one page at a time. The bound below is only meaningful
+    // while the rendered list grows with the fetched pages, so it is skipped there and `hasMoreResults`
+    // alone decides when to stop.
     const fetchMoreResults = useCallback(() => {
-        if (!isFocused || !searchResults?.search?.hasMoreResults || shouldShowLoadingState || shouldShowLoadingMoreItems || offset > allDataLength - CONST.SEARCH.RESULTS_PAGE_SIZE) {
+        const hasFetchedPastRenderedRows = !shouldUseLiveData && offset > allDataLength - CONST.SEARCH.RESULTS_PAGE_SIZE;
+        if (!isFocused || !searchResults?.search?.hasMoreResults || shouldShowLoadingState || shouldShowLoadingMoreItems || hasFetchedPastRenderedRows) {
             return;
         }
 
         setOffset((prev) => prev + CONST.SEARCH.RESULTS_PAGE_SIZE);
-    }, [isFocused, searchResults?.search?.hasMoreResults, shouldShowLoadingMoreItems, shouldShowLoadingState, offset, allDataLength]);
+    }, [isFocused, searchResults?.search?.hasMoreResults, shouldShowLoadingMoreItems, shouldShowLoadingState, offset, allDataLength, shouldUseLiveData]);
+
+    // The rendered list of a to-do search is complete from the first render, so its end never moves and
+    // `onEndReached` stops firing after a page or two - leaving the later rows without the `reportActions_*`
+    // that only the paginated response delivers. Drive pagination off `hasMoreResults` instead of scroll
+    // position here; requests still serialize behind each other and stop once the backend reports no more.
+    useEffect(() => {
+        if (!shouldUseLiveData) {
+            return;
+        }
+
+        fetchMoreResults();
+    }, [shouldUseLiveData, searchResults?.search?.hasMoreResults, fetchMoreResults]);
 
     const onLayoutBase = useCallback(() => {
         hasHadFirstLayout.current = true;

@@ -64,7 +64,11 @@ function SearchResultsProvider({children}: SearchResultsProviderProps) {
         // This ensures we show the empty state instead of loading/blocking views
         currentSearchResults = {
             search: {...searchInfo, isLoading: false, hasResults},
-            data: liveData.data,
+            // The live data covers every matching report, but only the paginated Search response carries
+            // `reportActions_*` for reports the user never opened, which is what the Exported/Exported To
+            // cells read. Layering the live data over the snapshot keeps the fresh report state while
+            // preserving the export actions already fetched, instead of discarding the snapshot outright.
+            data: {...snapshotSearchResults?.data, ...liveData.data},
         };
     } else {
         currentSearchResults = snapshotSearchResults ?? undefined;
