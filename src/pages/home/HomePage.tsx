@@ -19,7 +19,6 @@ import ONYXKEYS from '@src/ONYXKEYS';
 import React, {useRef, useState} from 'react';
 import {View} from 'react-native';
 
-import DiscoverSection from './DiscoverSection';
 import ForYouSection from './ForYouSection';
 import FreeTrialSection from './FreeTrialSection';
 import GettingStartedSection from './GettingStartedSection';
@@ -85,7 +84,6 @@ function HomePage() {
                                     <YourSpendSection />
                                     <RecentlyAddedSection />
                                     <InsightsSection />
-                                    <DiscoverSection />
                                 </>
                             ) : (
                                 <>
@@ -108,7 +106,6 @@ function HomePage() {
                                         <YourSpendSection />
                                         <RecentlyAddedSection />
                                         <UpcomingTravelSection />
-                                        <DiscoverSection />
                                     </View>
                                 </>
                             )}

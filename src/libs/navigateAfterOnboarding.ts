@@ -81,6 +81,10 @@ function navigateAfterOnboarding(
 ) {
     setDisableDismissOnEscape(false);
 
+    // Keep the Side Panel closed on the first view after onboarding so the user is onboarded in one place (Home).
+    // This also clears any stale `open: true` left in the NVP by an earlier session or an interrupted flow.
+    SidePanelActions.dismissSidePanel();
+
     // On mobile (small screen), Track workspace admins with the trackExpensesWithConcierge variant
     // should navigate directly to the Concierge DM (which contains onboarding tasks).
     // This check is outside shouldOpenRHPVariant because that function returns false on native
@@ -142,10 +146,11 @@ function navigateAfterOnboardingWithMicrotaskQueue(
 
 /**
  * After creating or joining a Submit workspace during onboarding, navigate to Spend > Expenses
- * with the side panel open so the #admins room is visible in Concierge Anywhere.
+ * with the side panel closed. The user can open Concierge from the help button when they need it.
  */
-function navigateToSubmitWorkspaceAfterOnboarding(policyID?: string, shouldUseNarrowLayout = false) {
+function navigateToSubmitWorkspaceAfterOnboarding(policyID?: string) {
     setDisableDismissOnEscape(false);
+    SidePanelActions.dismissSidePanel();
 
     if (!policyID) {
         Navigation.navigate(ROUTES.HOME);
@@ -154,13 +159,12 @@ function navigateToSubmitWorkspaceAfterOnboarding(policyID?: string, shouldUseNa
 
     setOnboardingRHPVariant(CONST.ONBOARDING_RHP_VARIANT.RHP_ADMINS_ROOM);
     Navigation.navigate(ROUTES.SEARCH_ROOT.getRoute({query: buildCannedSearchQuery({type: CONST.SEARCH.DATA_TYPES.EXPENSE})}));
-    SidePanelActions.openSidePanel(!shouldUseNarrowLayout);
 }
 
-function navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue(policyID?: string, shouldUseNarrowLayout = false) {
+function navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue(policyID?: string) {
     dismissOnboardingModalBeforeExit();
     Navigation.setNavigationActionToMicrotaskQueue(() => {
-        navigateToSubmitWorkspaceAfterOnboarding(policyID, shouldUseNarrowLayout);
+        navigateToSubmitWorkspaceAfterOnboarding(policyID);
     });
 }
 

@@ -18,7 +18,7 @@ jest.mock('@libs/Navigation/Navigation', () => ({
 
 jest.mock('@libs/actions/SidePanel', () => ({
     __esModule: true,
-    default: {openSidePanel: jest.fn()},
+    default: {openSidePanel: jest.fn(), dismissSidePanel: jest.fn()},
 }));
 
 jest.mock('@libs/actions/Welcome', () => ({
@@ -36,7 +36,7 @@ describe('navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue', () => {
         jest.clearAllMocks();
     });
 
-    it('navigates to HOME without opening the side panel when policyID is missing', () => {
+    it('navigates to HOME with the side panel closed when policyID is missing', () => {
         navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue(undefined);
 
         expect(navigationMock.dismissModal).toHaveBeenCalledTimes(1);
@@ -45,26 +45,19 @@ describe('navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue', () => {
         // Without a workspace there is no #admins room to surface in the side panel.
         expect(setOnboardingRHPVariant).not.toHaveBeenCalled();
         expect(SidePanelActions.openSidePanel).not.toHaveBeenCalled();
+        expect(SidePanelActions.dismissSidePanel).toHaveBeenCalledTimes(1);
     });
 
-    it('navigates to Spend > Expenses with the expanded side panel when not using narrow layout', () => {
-        navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue('test-policy-id', false);
+    it('navigates to Spend > Expenses with the side panel closed when a Submit workspace exists', () => {
+        navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue('test-policy-id');
 
         expect(navigationMock.dismissModal).toHaveBeenCalledTimes(1);
         expect(navigationMock.navigate).toHaveBeenCalledTimes(1);
         expect(navigationMock.navigate).toHaveBeenCalledWith(ROUTES.SEARCH_ROOT.getRoute({query: buildCannedSearchQuery({type: CONST.SEARCH.DATA_TYPES.EXPENSE})}));
-        // The side panel shows the #admins room, where the Submit welcome and its suggested responses are posted.
+        // The variant is still recorded so the #admins room is what the user sees when they open the side panel themselves.
         expect(setOnboardingRHPVariant).toHaveBeenCalledWith(CONST.ONBOARDING_RHP_VARIANT.RHP_ADMINS_ROOM);
-        expect(SidePanelActions.openSidePanel).toHaveBeenCalledWith(true);
-    });
-
-    it('navigates to Spend > Expenses with the collapsed side panel when using narrow layout', () => {
-        navigateToSubmitWorkspaceAfterOnboardingWithMicrotaskQueue('test-policy-id', true);
-
-        expect(navigationMock.dismissModal).toHaveBeenCalledTimes(1);
-        expect(navigationMock.navigate).toHaveBeenCalledTimes(1);
-        expect(navigationMock.navigate).toHaveBeenCalledWith(ROUTES.SEARCH_ROOT.getRoute({query: buildCannedSearchQuery({type: CONST.SEARCH.DATA_TYPES.EXPENSE})}));
-        expect(setOnboardingRHPVariant).toHaveBeenCalledWith(CONST.ONBOARDING_RHP_VARIANT.RHP_ADMINS_ROOM);
-        expect(SidePanelActions.openSidePanel).toHaveBeenCalledWith(false);
+        // The side panel is no longer force-opened after onboarding; any stale open state is cleared instead.
+        expect(SidePanelActions.openSidePanel).not.toHaveBeenCalled();
+        expect(SidePanelActions.dismissSidePanel).toHaveBeenCalledTimes(1);
     });
 });
