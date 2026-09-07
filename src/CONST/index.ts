@@ -8499,6 +8499,10 @@ const CONST = {
             'BeneficiaryCedulaID',
             'BeneficiaryTaxID',
         ] as string[],
+        // Account holder address fields that must always be collected for a deposit account (reporting requirement),
+        // regardless of whether Corpay marks them as required for the selected country/currency.
+        // accountHolderAddress2 (apartment/suite) is intentionally excluded as it is inherently optional.
+        REQUIRED_ACCOUNT_HOLDER_ADDRESS_KEYS: ['accountHolderAddress1', 'accountHolderCity', 'accountHolderRegion', 'accountHolderPostal', 'accountHolderCountry'] as string[],
         SPECIAL_LIST_REGION_KEYS: ['bankRegion', 'accountHolderRegion'] as string[],
         SPECIAL_LIST_ADDRESS_KEYS: ['bankAddressLine1', 'accountHolderAddress1'] as string[],
         PAGE_NAME: {

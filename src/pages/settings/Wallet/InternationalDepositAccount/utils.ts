@@ -16,8 +16,23 @@ import type {ValueOf} from 'type-fest';
 
 import lodashSortBy from 'lodash/sortBy';
 
+/**
+ * Returns the account holder fields map with the address fields forced to be required.
+ * Corpay decides per country/currency whether the account holder's address is required, but a deposit account must
+ * always collect it (reporting requirement), so we never trust Corpay's `isRequired` flag for those fields.
+ * Only fields Corpay actually returned are touched — no field is fabricated for countries where Corpay omits it.
+ */
+function getAccountHolderFieldsMap(accountHolderFields: CorpayFieldsMap | undefined): CorpayFieldsMap {
+    const fields = accountHolderFields ?? {};
+    const nextFields: CorpayFieldsMap = {};
+    for (const [fieldName, field] of Object.entries(fields)) {
+        nextFields[fieldName] = CONST.CORPAY_FIELDS.REQUIRED_ACCOUNT_HOLDER_ADDRESS_KEYS.includes(fieldName) ? {...field, isRequired: true} : field;
+    }
+    return nextFields;
+}
+
 function getFieldsMap(corpayFields: OnyxEntry<CorpayFields>): Record<ValueOf<typeof CONST.CORPAY_FIELDS.PAGE_NAME>, CorpayFieldsMap> {
-    return (corpayFields?.formFields ?? []).reduce(
+    const fieldsMap = (corpayFields?.formFields ?? []).reduce(
         (acc, field) => {
             if (!field.id) {
                 return acc;
@@ -38,6 +53,14 @@ function getFieldsMap(corpayFields: OnyxEntry<CorpayFields>): Record<ValueOf<typ
         },
         {} as Record<ValueOf<typeof CONST.CORPAY_FIELDS.PAGE_NAME>, CorpayFieldsMap>,
     );
+
+    // Every consumer of the account holder page (skip decision, initial substep, rendering, validation and the
+    // confirmation summary) must read the same map, so the address requirement is applied once, here.
+    if (fieldsMap[CONST.CORPAY_FIELDS.PAGE_NAME.ACCOUNT_HOLDER_DETAILS]) {
+        fieldsMap[CONST.CORPAY_FIELDS.PAGE_NAME.ACCOUNT_HOLDER_DETAILS] = getAccountHolderFieldsMap(fieldsMap[CONST.CORPAY_FIELDS.PAGE_NAME.ACCOUNT_HOLDER_DETAILS]);
+    }
+
+    return fieldsMap;
 }
 
 function getLatestCreatedBankAccount(bankAccountList: OnyxEntry<BankAccountList>): BankAccount | undefined {
@@ -150,4 +173,4 @@ function getValidationErrors(values: FormOnyxValues<typeof ONYXKEYS.FORMS.INTERN
     return errors;
 }
 
-export {getFieldsMap, getSubstepValues, getInitialPersonalDetailsValues, getInitialSubstep, testValidation, getValidationErrors};
+export {getFieldsMap, getAccountHolderFieldsMap, getSubstepValues, getInitialPersonalDetailsValues, getInitialSubstep, testValidation, getValidationErrors};
