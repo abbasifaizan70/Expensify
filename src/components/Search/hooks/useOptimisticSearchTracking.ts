@@ -43,7 +43,12 @@ function useOptimisticSearchTracking({searchResults, queryJSON, transactions, re
     const {type} = queryJSON;
 
     const hasPendingWriteOnMount = hasDeferredWrite(CONST.DEFERRED_LAYOUT_WRITE_KEYS.SEARCH);
-    const initialWatchKey = getOptimisticWatchKey(CONST.DEFERRED_LAYOUT_WRITE_KEYS.SEARCH);
+    // getOptimisticWatchKey() falls back to `flushedWatchKeys`, which deliberately outlives its channel and
+    // is only replaced by the next create. A mount with no pending write (e.g. a new query hash after the
+    // created expense settled) must not adopt that parked key: nothing in this lifecycle could ever clear it
+    // (every clear path is gated on hasPendingWriteOnMount), so the stale transaction would be spliced into
+    // every later, unrelated query. Only seed from the channel when a write is actually in flight.
+    const initialWatchKey = hasPendingWriteOnMount ? getOptimisticWatchKey(CONST.DEFERRED_LAYOUT_WRITE_KEYS.SEARCH) : undefined;
 
     const mutableRef = useRef<TrackingMutableState>({
         hasPendingWriteOnMount,
