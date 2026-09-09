@@ -2,6 +2,7 @@ import FailureTracking from './FailureTracking';
 import FraudMonitoring from './FraudMonitoring';
 import handleDeletedAccount from './HandleDeletedAccount';
 import HandleMovedScanFailedExpenses from './HandleMovedScanFailedExpenses';
+import HandleSecondaryLoginInvites from './HandleSecondaryLoginInvites';
 import HandleUnusedOptimisticID from './HandleUnusedOptimisticID';
 import LoadPostDataForOpenOrReconnect from './LoadPostDataForOpenOrReconnect';
 import LoadTest from './LoadTest';
@@ -15,6 +16,7 @@ import SupportalPermission from './SupportalPermission';
 
 export {
     HandleMovedScanFailedExpenses,
+    HandleSecondaryLoginInvites,
     HandleUnusedOptimisticID,
     LoadTest,
     Logging,
