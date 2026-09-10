@@ -510,6 +510,10 @@ function ReportActionsListContent({reportID, conciergeChat, onLayout}: ReportAct
                     onLoad={onLoad}
                     onContentSizeChange={() => {
                         trackVerticalScrolling(undefined);
+                        // A sent message grows the content without changing the list container's layout, so the
+                        // pending scroll-to-bottom armed by the live-tail callback would otherwise wait for an unrelated
+                        // onLayout. Flush it here, once the new row has been measured. No-op unless a scroll is owed.
+                        flushPendingScrollToBottom();
                     }}
                 />
             </ReportActionsListPaddingView>

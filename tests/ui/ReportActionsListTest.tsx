@@ -160,6 +160,7 @@ type MockInvertedFlashListProps = {
     data?: OnyxTypes.ReportAction[];
     extraData?: unknown;
     renderItem?: (info: {item: OnyxTypes.ReportAction; index: number}) => React.ReactElement | null;
+    onContentSizeChange?: () => void;
 };
 
 const mockInvertedFlashList: jest.MockedFunction<(props: MockInvertedFlashListProps) => null> = jest.requireMock('@components/FlashList/InvertedFlashList');
@@ -594,6 +595,41 @@ describe('ReportActionsList (body)', () => {
 
             expect(screen.queryByTestId('ReportActionsSkeletonView')).toBeNull();
             expect(mockMarkOpenReportEnd).not.toHaveBeenCalledWith(mockReport.reportID, mockReport, {warm: false});
+        });
+    });
+
+    describe('Pending scroll-to-bottom flush', () => {
+        it('flushes the pending scroll-to-bottom when the list content grows', () => {
+            // A sent message grows the content without changing the list container's layout, so the flush
+            // armed by the live-tail callback has to run from onContentSizeChange — onLayout never fires for it.
+            const flushPendingScrollToBottom = jest.fn();
+            const trackVerticalScrolling = jest.fn();
+            mockUseReportActionsScroll.mockReturnValue({
+                listRef: {current: null},
+                trackVerticalScrolling,
+                onViewableItemsChanged: jest.fn(),
+                isFloatingMessageCounterVisible: false,
+                isActionBadgeAboveViewport: false,
+                scrollToBottomAndMarkReportAsRead: jest.fn(),
+                scrollToActionBadgeTarget: jest.fn(),
+                flushPendingScrollToBottom,
+                shouldBeAlignedToTop: false,
+                shouldFocusToTopOnMount: false,
+                initialScrollKey: undefined,
+                shouldAutoscrollToBottom: false,
+                onLoad: jest.fn(),
+            });
+            mockUseNetwork.mockReturnValue({isOffline: false});
+
+            renderReportActionsList();
+            expect(flushPendingScrollToBottom).not.toHaveBeenCalled();
+
+            // When the list reports a content size change
+            getCapturedListProps()?.onContentSizeChange?.();
+
+            // Then the owed scroll is flushed after the offset tracking is refreshed
+            expect(trackVerticalScrolling).toHaveBeenCalledWith(undefined);
+            expect(flushPendingScrollToBottom).toHaveBeenCalledTimes(1);
         });
     });
 
