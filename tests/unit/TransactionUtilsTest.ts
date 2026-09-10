@@ -2498,6 +2498,29 @@ describe('TransactionUtils', () => {
             expect(TransactionUtils.shouldShowViolation(iouReport, policy, CONST.VIOLATIONS.OVER_AUTO_APPROVAL_LIMIT, CURRENT_USER_EMAIL, CURRENT_USER_ID)).toBe(true);
         });
 
+        describe('duplicatedTransaction', () => {
+            // Duplicate detection is a workspace feature; the backend can still attach the violation to an expense that
+            // was submitted 1:1, and the App has to hide it there.
+            const policy: Policy = createRandomPolicy(0, CONST.POLICY.TYPE.PERSONAL);
+
+            it('should hide the violation for an expense on an IOU report', () => {
+                const iouReport: Report = {...createRandomReport(0, undefined), type: CONST.REPORT.TYPE.IOU, ownerAccountID: CURRENT_USER_ID, managerID: 2};
+
+                expect(TransactionUtils.shouldShowViolation(iouReport, policy, CONST.VIOLATIONS.DUPLICATED_TRANSACTION, CURRENT_USER_EMAIL, CURRENT_USER_ID)).toBe(false);
+            });
+
+            it('should show the violation for an expense on a workspace expense report', () => {
+                const expenseReport: Report = {...createRandomReport(0, undefined), type: CONST.REPORT.TYPE.EXPENSE, ownerAccountID: CURRENT_USER_ID};
+                const teamPolicy: Policy = createRandomPolicy(1, CONST.POLICY.TYPE.TEAM);
+
+                expect(TransactionUtils.shouldShowViolation(expenseReport, teamPolicy, CONST.VIOLATIONS.DUPLICATED_TRANSACTION, CURRENT_USER_EMAIL, CURRENT_USER_ID)).toBe(true);
+            });
+
+            it('should keep showing the violation when the report is unknown', () => {
+                expect(TransactionUtils.shouldShowViolation(undefined, undefined, CONST.VIOLATIONS.DUPLICATED_TRANSACTION, CURRENT_USER_EMAIL, CURRENT_USER_ID)).toBe(true);
+            });
+        });
+
         describe('futureDate', () => {
             // The violation is not cached by the backend, so it is re-evaluated here against the NOW +14 hours rule.
             // The clock is pinned on each case, otherwise these pass or fail by time of day.
@@ -2529,6 +2552,37 @@ describe('TransactionUtils', () => {
 
                 expect(shouldShowFutureDate({...createRandomTransaction(0), created: '2026-08-30'})).toBe(false);
             });
+        });
+    });
+
+    describe('isDuplicate', () => {
+        const duplicateViolation: TransactionViolation = {
+            name: CONST.VIOLATIONS.DUPLICATED_TRANSACTION,
+            type: CONST.VIOLATION_TYPES.VIOLATION,
+            data: {duplicates: ['2']},
+        };
+
+        it('should return true for a non-dismissed duplicate violation on a workspace expense report', () => {
+            const transaction: Transaction = {...createRandomTransaction(1), reportID: '10'};
+            const expenseReport: Report = {...createRandomReport(10, undefined), type: CONST.REPORT.TYPE.EXPENSE, ownerAccountID: CURRENT_USER_ID};
+            const policy: Policy = createRandomPolicy(0, CONST.POLICY.TYPE.TEAM);
+
+            expect(TransactionUtils.isDuplicate(transaction, CURRENT_USER_EMAIL, CURRENT_USER_ID, expenseReport, CURRENT_USER_EMAIL, policy, [duplicateViolation])).toBe(true);
+        });
+
+        it('should return false when the duplicate violation belongs to an expense on an IOU report', () => {
+            const transaction: Transaction = {...createRandomTransaction(1), reportID: '10'};
+            const iouReport: Report = {...createRandomReport(10, undefined), type: CONST.REPORT.TYPE.IOU, ownerAccountID: CURRENT_USER_ID, managerID: 2};
+            const policy: Policy = createRandomPolicy(0, CONST.POLICY.TYPE.PERSONAL);
+
+            expect(TransactionUtils.isDuplicate(transaction, CURRENT_USER_EMAIL, CURRENT_USER_ID, iouReport, CURRENT_USER_EMAIL, policy, [duplicateViolation])).toBe(false);
+        });
+
+        it('should return false when there is no duplicate violation', () => {
+            const transaction: Transaction = {...createRandomTransaction(1), reportID: '10'};
+            const expenseReport: Report = {...createRandomReport(10, undefined), type: CONST.REPORT.TYPE.EXPENSE, ownerAccountID: CURRENT_USER_ID};
+
+            expect(TransactionUtils.isDuplicate(transaction, CURRENT_USER_EMAIL, CURRENT_USER_ID, expenseReport, CURRENT_USER_EMAIL, undefined, [])).toBe(false);
         });
     });
 

@@ -2278,6 +2278,13 @@ function shouldShowViolation(
         return false;
     }
 
+    // Duplicate detection is a workspace (Collect/Control) feature, so an expense on a 1:1 IOU report is never a
+    // duplicate. The backend can still attach the violation to such an expense (e.g. two scans of one receipt submitted
+    // to different people), so the rule has to be applied here rather than trusting the stored violation.
+    if (violationName === CONST.VIOLATIONS.DUPLICATED_TRANSACTION) {
+        return !isIOUReport(iouReport);
+    }
+
     return true;
 }
 
@@ -2457,7 +2464,12 @@ function isDuplicate(
         policy,
     );
 
-    return hasDuplicatedTransactionViolation && !isDuplicatedTransactionViolationDismissed;
+    if (!hasDuplicatedTransactionViolation || isDuplicatedTransactionViolationDismissed) {
+        return false;
+    }
+
+    // Inherit the visibility rule instead of keeping a parallel one, so every duplicate affordance agrees
+    return shouldShowViolation(iouReport, policy, CONST.VIOLATIONS.DUPLICATED_TRANSACTION, currentUserEmail, currentUserAccountID, true, transaction);
 }
 
 /**
