@@ -48,11 +48,11 @@ function SearchEditMultipleTagPage() {
 
     const saveTag = (item: Partial<OptionData>) => {
         const selectedTagName = item.searchText ?? '';
-        // Tapping the value already committed in this draft means the user is clearing the level.
-        // getUpdatedTransactionTag resolves the same thing internally for the displayed tag, but the
-        // intent has to be resolved again here because apply time replays each recorded intent with an
-        // empty currentTag. A raw tag name would read as a fresh selection there and re-add the level
-        // the user just cleared, so record an empty value to carry the clear through.
+        // currentTag is read from this draft only, so tapping the value already committed here can only
+        // ever undo a selection the user made in this same draft: the level goes back to untouched, not
+        // to cleared. The intent has to be resolved again here because apply time replays each recorded
+        // intent with an empty currentTag, where a raw tag name would read as a fresh selection and
+        // re-add the level the user just undid.
         const isDeselecting = selectedTagName === currentTag;
 
         const updatedTag = getUpdatedTransactionTag({
@@ -70,7 +70,11 @@ function SearchEditMultipleTagPage() {
         // draft is merged, so without this a stale child edit would be replayed after this parent change
         // at apply time and re-add a child that no longer belongs under the newly selected parent, even
         // though the displayed updatedTag above already cleared it. Independent tags keep every level.
-        const bulkEditTagChanges: Record<string, string | null> = {[tagListIndex]: isDeselecting ? '' : selectedTagName};
+        // Undoing a selection made in this draft has to drop the level's intent rather than record an
+        // empty one: an empty intent is replayed at apply time as a real clear of that level on every
+        // selected transaction, wiping a tag the user never touched. null deletes the key because the
+        // draft is written with Onyx.merge, so the round trip leaves nothing for apply time to replay.
+        const bulkEditTagChanges: Record<string, string | null> = {[tagListIndex]: isDeselecting ? null : selectedTagName};
         if (hasDependentTags) {
             for (const recordedIndex of Object.keys(draftTransaction?.bulkEditTagChanges ?? {})) {
                 if (Number(recordedIndex) <= tagListIndex) {
@@ -80,10 +84,19 @@ function SearchEditMultipleTagPage() {
             }
         }
 
+        // Once every recorded intent is gone the draft has to go back to having no tag edit at all,
+        // flattened tag included. Apply time falls back to that flattened tag whenever no per-level
+        // intent survives, and a deselect on one level of an independent multi-level tag leaves a hole
+        // behind (`:ProjX`), which is still truthy and would be written over every selected
+        // transaction's own tag - wiping the level the user just put back.
+        const hasRemainingTagChanges = Object.values({...draftTransaction?.bulkEditTagChanges, ...bulkEditTagChanges}).some((recordedTag) => recordedTag !== null);
+
         updateBulkEditDraftTransaction({
             // Keep the flattened tag for the summary display, and record the per-level edit intent so
             // apply time can merge it into each transaction's own tag instead of overwriting all levels.
-            tag: updatedTag,
+            // null clears the key, so the next open of the picker reads the selection's shared tag again
+            // exactly as it did before the round trip.
+            tag: hasRemainingTagChanges ? updatedTag : null,
             bulkEditTagChanges,
         });
         Navigation.goBack();
