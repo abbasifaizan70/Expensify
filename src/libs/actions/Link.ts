@@ -17,6 +17,7 @@ import Navigation from '@libs/Navigation/Navigation';
 import navigationRef from '@libs/Navigation/navigationRef';
 import REPORT_LINK_ROUTE_PARAMS from '@libs/Navigation/reportLinkRouteParams';
 import {getIsOffline} from '@libs/NetworkState';
+import {setPendingConciergeDeepLink} from '@libs/PendingConciergeDeepLink';
 import {findLastAccessedReport, getReportIDFromLink, getReportOrDraftReport, getRouteFromLink, isMoneyRequestReport} from '@libs/ReportUtils';
 import shouldSkipDeepLinkNavigation from '@libs/shouldSkipDeepLinkNavigation';
 import {endSpan, getSpan, startSpan} from '@libs/telemetry/activeSpans';
@@ -574,6 +575,15 @@ function openReportFromDeepLink(
                 // Capture once. Use the raw flag, not the selector, which returns `true` for the empty NVP a fresh sign-up briefly has.
                 if (!isAuthenticated && initialHasCompletedGuidedSetupFlow === undefined && val && !isAnonymousUser()) {
                     initialHasCompletedGuidedSetupFlow = val.hasCompletedGuidedSetupFlow;
+
+                    // This link is about to be dropped below because the user still has to onboard (#91437), and
+                    // navigateAfterOnboarding never picks the Concierge chat on its own, so the intent would be lost
+                    // and the new account would land on Home (#99940). Hand it over now rather than at the drop:
+                    // the drop only runs once onboarding completes, by which point the onboarding screen is usually
+                    // still focused and the guard above it returns first.
+                    if (initialHasCompletedGuidedSetupFlow === false && normalizePath(route) === `/${ROUTES.CONCIERGE}`) {
+                        setPendingConciergeDeepLink();
+                    }
                 }
 
                 Navigation.waitForProtectedRoutes().then(() => {

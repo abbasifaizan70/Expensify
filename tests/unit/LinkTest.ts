@@ -1,18 +1,24 @@
-import {canAnonymousUserAccessRoute, isAnonymousUser} from '@libs/actions/Session';
+import {canAnonymousUserAccessRoute, isAnonymousUser, waitForUserSignIn} from '@libs/actions/Session';
 import getIsNarrowLayout from '@libs/getIsNarrowLayout';
 import Navigation from '@libs/Navigation/Navigation';
 import navigationRef from '@libs/Navigation/navigationRef';
 import REPORT_LINK_ROUTE_PARAMS from '@libs/Navigation/reportLinkRouteParams';
+import {clearPendingConciergeDeepLink, consumePendingConciergeDeepLink} from '@libs/PendingConciergeDeepLink';
 import * as Url from '@libs/Url';
 
 import CONFIG from '@src/CONFIG';
 import CONST from '@src/CONST';
-import {getInternalNewExpensifyPath, openLink} from '@src/libs/actions/Link';
+import {getInternalNewExpensifyPath, openLink, openReportFromDeepLink} from '@src/libs/actions/Link';
 import NAVIGATORS from '@src/NAVIGATORS';
+import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
 import SCREENS from '@src/SCREENS';
 
 import type {NavigationState} from '@react-navigation/native';
+
+import Onyx from 'react-native-onyx';
+
+import waitForBatchedUpdates from '../utils/waitForBatchedUpdates';
 
 const mockReports: Record<string, {isMoneyRequest?: boolean}> = {};
 type ReportUtilsMock = Record<string, unknown> & {
@@ -33,8 +39,10 @@ jest.mock('@libs/Navigation/Navigation', () => ({
     default: {
         closeRHPFlow: jest.fn(),
         getActiveRoute: jest.fn(),
+        getTopmostReportId: jest.fn(),
         navigate: jest.fn(),
         setParams: jest.fn(),
+        waitForProtectedRoutes: jest.fn(() => Promise.resolve()),
     },
 }));
 jest.mock('@libs/actions/Session', () => ({
@@ -58,6 +66,7 @@ const mockedNavigation = jest.mocked(Navigation);
 const mockedNavigationRef = jest.mocked(navigationRef);
 const mockedCanAnonymousUserAccessRoute = jest.mocked(canAnonymousUserAccessRoute);
 const mockedIsAnonymousUser = jest.mocked(isAnonymousUser);
+const mockedWaitForUserSignIn = jest.mocked(waitForUserSignIn);
 
 function buildNavigationState(key: string, routes: NavigationState['routes'], index = routes.length - 1): NavigationState {
     return {
@@ -375,5 +384,75 @@ describe('Link.getInternalNewExpensifyPath', () => {
 
     it('returns an empty path for an empty href', () => {
         expect(getInternalNewExpensifyPath('')).toBe('');
+    });
+});
+
+describe('Link.openReportFromDeepLink', () => {
+    const CONCIERGE_URL = `${CONST.NEW_EXPENSIFY_URL}concierge`;
+
+    beforeAll(() => {
+        Onyx.init({keys: ONYXKEYS});
+        return waitForBatchedUpdates();
+    });
+
+    beforeEach(async () => {
+        jest.clearAllMocks();
+        clearPendingConciergeDeepLink();
+        mockedIsAnonymousUser.mockReturnValue(false);
+        mockedCanAnonymousUserAccessRoute.mockReturnValue(true);
+        mockedNavigationRef.getRootState.mockReturnValue(buildRootState());
+        mockedWaitForUserSignIn.mockResolvedValue(true);
+        mockedNavigation.waitForProtectedRoutes.mockResolvedValue(undefined);
+        await Onyx.clear();
+    });
+
+    /** Opens the deep link with the onboarding NVP a fresh sign-up has on arrival: signed up, not yet onboarded. */
+    async function openLinkBeforeOnboarding(url: string) {
+        await Onyx.set(ONYXKEYS.NVP_ONBOARDING, {hasCompletedGuidedSetupFlow: false});
+        openReportFromDeepLink(url, {}, false, undefined, undefined, undefined, undefined, 1);
+        await waitForBatchedUpdates();
+    }
+
+    it('records the Concierge intent as soon as the link is captured, before onboarding completes', async () => {
+        await openLinkBeforeOnboarding(CONCIERGE_URL);
+
+        // Recorded at capture, not when the link is later dropped: by then the onboarding screen is usually still
+        // focused and handleDeeplinkNavigation returns on that guard before the drop is ever reached.
+        expect(consumePendingConciergeDeepLink()).toBe(true);
+        // navigateAfterOnboarding owns the destination, so nothing is navigated from here.
+        expect(mockedNavigation.navigate).not.toHaveBeenCalled();
+    });
+
+    it('still holds the Concierge intent when onboarding completes while the onboarding screen is focused', async () => {
+        mockedNavigationRef.getRootState.mockReturnValue(
+            buildNavigationState('root', [
+                {
+                    key: NAVIGATORS.ONBOARDING_MODAL_NAVIGATOR,
+                    name: NAVIGATORS.ONBOARDING_MODAL_NAVIGATOR,
+                    state: buildNavigationState(`${NAVIGATORS.ONBOARDING_MODAL_NAVIGATOR}-state`, [{key: SCREENS.ONBOARDING.PURPOSE, name: SCREENS.ONBOARDING.PURPOSE}]),
+                },
+            ]),
+        );
+        await openLinkBeforeOnboarding(CONCIERGE_URL);
+
+        await Onyx.merge(ONYXKEYS.NVP_ONBOARDING, {hasCompletedGuidedSetupFlow: true});
+        await waitForBatchedUpdates();
+
+        expect(consumePendingConciergeDeepLink()).toBe(true);
+    });
+
+    it('does not record an intent for a deep link to any other route', async () => {
+        await openLinkBeforeOnboarding(`${CONST.NEW_EXPENSIFY_URL}settings/profile`);
+
+        expect(consumePendingConciergeDeepLink()).toBe(false);
+    });
+
+    it('does not record an intent when the user had already onboarded', async () => {
+        await Onyx.set(ONYXKEYS.NVP_ONBOARDING, {hasCompletedGuidedSetupFlow: true});
+        openReportFromDeepLink(CONCIERGE_URL, {}, false, undefined, undefined, undefined, undefined, 1);
+        await waitForBatchedUpdates();
+
+        expect(consumePendingConciergeDeepLink()).toBe(false);
+        expect(mockedNavigation.navigate).toHaveBeenCalled();
     });
 });

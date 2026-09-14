@@ -16,6 +16,7 @@ import isReportTopmostSplitNavigator from './Navigation/helpers/isReportTopmostS
 import {dismissOnboardingModalBeforeExit} from './Navigation/helpers/OnboardingNavigationUtils';
 import shouldOpenOnAdminRoom from './Navigation/helpers/shouldOpenOnAdminRoom';
 import Navigation from './Navigation/Navigation';
+import {consumePendingConciergeDeepLink} from './PendingConciergeDeepLink';
 import {findLastAccessedReport, isConciergeChatReport, isSelfDM} from './ReportUtils';
 import {buildCannedSearchQuery} from './SearchQueryUtils';
 
@@ -81,13 +82,25 @@ function navigateAfterOnboarding(
 ) {
     setDisableDismissOnEscape(false);
 
+    const navigationOptions = options?.afterTransition ? {afterTransition: options.afterTransition} : undefined;
+
+    // A signed-out user who deep linked to /concierge and then signed up had that link dropped before onboarding
+    // (#91437), which hands the intent to us instead (#99940). Honor it before every other rule so it wins on any
+    // screen size and under any onboarding variant, and consume it so a later completion can't replay it.
+    // ROUTES.CONCIERGE rather than the report route: ConciergePage waits for the report data to load and then
+    // resolves (or creates) the Concierge chat itself, so this works even when conciergeReportID isn't known yet.
+    if (consumePendingConciergeDeepLink()) {
+        Navigation.navigate(ROUTES.CONCIERGE, navigationOptions);
+        return;
+    }
+
+    const variantOverride = options?.variantOverride;
+    const variant = variantOverride ?? onboardingRHPVariant;
+
     // On mobile (small screen), Track workspace admins with the trackExpensesWithConcierge variant
     // should navigate directly to the Concierge DM (which contains onboarding tasks).
     // This check is outside shouldOpenRHPVariant because that function returns false on native
     // (Side Panel doesn't exist on native), but we still need to navigate to Concierge on mobile.
-    const navigationOptions = options?.afterTransition ? {afterTransition: options.afterTransition} : undefined;
-    const variantOverride = options?.variantOverride;
-    const variant = variantOverride ?? onboardingRHPVariant;
     if (isSmallScreenWidth && variant === CONST.ONBOARDING_RHP_VARIANT.TRACK_EXPENSES_WITH_CONCIERGE) {
         Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(conciergeReportID), navigationOptions);
         return;
