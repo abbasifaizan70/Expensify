@@ -113,6 +113,7 @@ type ThemeColors = {
     tooltipSupportingText: Color;
     tooltipPrimaryText: Color;
     trialBannerBackgroundColor: Color;
+    selectedOptionBG: Color;
     widgetIconBG: Color;
     widgetIconFill: Color;
     skeletonLHNIn: Color;

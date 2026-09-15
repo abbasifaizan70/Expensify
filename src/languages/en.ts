@@ -3439,7 +3439,7 @@ const translations = {
             [CONST.ONBOARDING_COMPANY_SIZE.LARGE]: 'More than 1,000 employees',
         },
         accounting: {
-            title: 'Do you use any accounting software?',
+            title: 'Which accounting software do you use?',
             none: 'None',
             otherAccountingSoftware: 'Your accounting software',
         },

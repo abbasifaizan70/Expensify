@@ -4,11 +4,12 @@ import CollapsibleHeaderOnKeyboard from '@components/CollapsibleHeaderOnKeyboard
 import FixedFooter from '@components/FixedFooter';
 import FormHelpMessage from '@components/FormHelpMessage';
 import Icon from '@components/Icon';
+import type {ExpensifyIconName} from '@components/Icon/ExpensifyIconLoader';
 import OnboardingHeader from '@components/OnboardingHeader';
 import {PressableWithoutFeedback} from '@components/Pressable';
-import RadioButtonWithLabel from '@components/RadioButtonWithLabel';
 import ScreenWrapper from '@components/ScreenWrapper';
 import ScrollView from '@components/ScrollView';
+import SelectionButton from '@components/SelectionButton';
 import type {ListItem} from '@components/SelectionList/types';
 import Text from '@components/Text';
 import TextInput from '@components/TextInput';
@@ -33,7 +34,6 @@ import variables from '@styles/variables';
 
 import type {OnboardingAccounting} from '@src/CONST';
 import CONST from '@src/CONST';
-import type {TranslationPaths} from '@src/languages/types';
 import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
 import type IconAsset from '@src/types/utils/IconAsset';
@@ -46,55 +46,54 @@ import {View} from 'react-native';
 
 import type {BaseOnboardingAccountingProps} from './types';
 
+/**
+ * Every Expensify icon the accounting step renders. The lazy icon hook needs the names up front, and typing
+ * `Integration['iconName']` off this list keeps the two in step: a new integration can only reference an icon that is
+ * actually requested here.
+ */
+const ACCOUNTING_ICON_NAMES = [
+    'Connect',
+    'QBOCircle',
+    'QBDSquare',
+    'XeroCircle',
+    'NetSuiteSquare',
+    'IntacctSquare',
+    'IntuitSquare',
+    'CertiniaSquare',
+    'RilletSquare',
+    'DualEntrySquare',
+    'SapSquare',
+    'OracleSquare',
+    'MicrosoftDynamicsSquare',
+] as const satisfies readonly ExpensifyIconName[];
+
 type Integration = {
     key: keyof typeof CONST.POLICY.CONNECTIONS.NAME_USER_FRIENDLY;
-    iconName: 'QBOCircle' | 'QBDSquare' | 'XeroCircle' | 'NetSuiteSquare' | 'IntacctSquare' | 'SapSquare' | 'OracleSquare' | 'MicrosoftDynamicsSquare';
-    translationKey: TranslationPaths;
+    iconName: (typeof ACCOUNTING_ICON_NAMES)[number];
 };
 
 type AccountingOptionKey = Integration['key'] | 'other';
 
+const {NAME, ACCOUNTING_INTEGRATION_ALIASES} = CONST.POLICY.CONNECTIONS;
+
+/**
+ * The options offered on this step. Keys come from the connections constant rather than a second hardcoded list, and
+ * labels are read from `NAME_USER_FRIENDLY`, so adding an integration to the product only leaves this screen stale if
+ * it is deliberately left out of this array.
+ */
 const integrations: Integration[] = [
-    {
-        key: 'quickbooksOnline',
-        iconName: 'QBOCircle',
-        translationKey: 'workspace.accounting.qbo',
-    },
-    {
-        key: 'quickbooksDesktop',
-        iconName: 'QBDSquare',
-        translationKey: 'workspace.accounting.qbd',
-    },
-    {
-        key: 'xero',
-        iconName: 'XeroCircle',
-        translationKey: 'workspace.accounting.xero',
-    },
-    {
-        key: 'netsuite',
-        iconName: 'NetSuiteSquare',
-        translationKey: 'workspace.accounting.netsuite',
-    },
-    {
-        key: 'intacct',
-        iconName: 'IntacctSquare',
-        translationKey: 'workspace.accounting.intacct',
-    },
-    {
-        key: 'sap',
-        iconName: 'SapSquare',
-        translationKey: 'workspace.accounting.sap',
-    },
-    {
-        key: 'oracle',
-        iconName: 'OracleSquare',
-        translationKey: 'workspace.accounting.oracle',
-    },
-    {
-        key: 'microsoftDynamics',
-        iconName: 'MicrosoftDynamicsSquare',
-        translationKey: 'workspace.accounting.microsoftDynamics',
-    },
+    {key: NAME.QBO, iconName: 'QBOCircle'},
+    {key: NAME.QBD, iconName: 'QBDSquare'},
+    {key: NAME.XERO, iconName: 'XeroCircle'},
+    {key: NAME.NETSUITE, iconName: 'NetSuiteSquare'},
+    {key: NAME.SAGE_INTACCT, iconName: 'IntacctSquare'},
+    {key: ACCOUNTING_INTEGRATION_ALIASES.INTUIT_ENTERPRISE_SUITE, iconName: 'IntuitSquare'},
+    {key: NAME.CERTINIA, iconName: 'CertiniaSquare'},
+    {key: NAME.RILLET, iconName: 'RilletSquare'},
+    {key: NAME.DUALENTRY, iconName: 'DualEntrySquare'},
+    {key: 'sap', iconName: 'SapSquare'},
+    {key: 'oracle', iconName: 'OracleSquare'},
+    {key: 'microsoftDynamics', iconName: 'MicrosoftDynamicsSquare'},
 ];
 
 function isIntegrationKey(integrationKey: OnboardingAccounting | undefined): integrationKey is Integration['key'] {
@@ -103,6 +102,9 @@ function isIntegrationKey(integrationKey: OnboardingAccounting | undefined): int
 
 type OnboardingListItem = ListItem & {
     keyForList: AccountingOptionKey;
+
+    /** Every option on this step has a label, so narrow `ListItem`'s optional `text` for the tile's accessibility label. */
+    text: string;
 };
 
 function BaseOnboardingAccounting({shouldUseNativeStyles}: BaseOnboardingAccountingProps) {
@@ -110,17 +112,7 @@ function BaseOnboardingAccounting({shouldUseNativeStyles}: BaseOnboardingAccount
     const theme = useTheme();
     const StyleUtils = useStyleUtils();
     const {translate} = useLocalize();
-    const expensifyIcons = useMemoizedLazyExpensifyIcons([
-        'Connect',
-        'QBOCircle',
-        'QBDSquare',
-        'XeroCircle',
-        'NetSuiteSquare',
-        'IntacctSquare',
-        'SapSquare',
-        'OracleSquare',
-        'MicrosoftDynamicsSquare',
-    ]);
+    const expensifyIcons = useMemoizedLazyExpensifyIcons(ACCOUNTING_ICON_NAMES);
     // We need to use isSmallScreenWidth, see navigateAfterOnboarding function comment
     // eslint-disable-next-line rulesdir/prefer-shouldUseNarrowLayout-instead-of-isSmallScreenWidth
     const {onboardingIsMediumOrLargerScreenWidth, isSmallScreenWidth, isInLandscapeMode} = useResponsiveLayout();
@@ -161,13 +153,14 @@ function BaseOnboardingAccounting({shouldUseNativeStyles}: BaseOnboardingAccount
         const icon = expensifyIcons[integration.iconName] as IconAsset | undefined;
         return {
             keyForList: integration.key,
-            text: translate(integration.translationKey),
+            // These are brand names, so they are read from the connections constant rather than translated.
+            text: CONST.POLICY.CONNECTIONS.NAME_USER_FRIENDLY[integration.key],
             leftElement: (
                 <Icon
                     src={icon}
                     width={variables.iconSizeExtraLarge}
                     height={variables.iconSizeExtraLarge}
-                    additionalStyles={[StyleUtils.getAvatarBorderStyle(CONST.AVATAR_SIZE.DEFAULT, CONST.AVATAR_SHAPE.CIRCLE), styles.mr3]}
+                    additionalStyles={[StyleUtils.getAvatarBorderStyle(CONST.AVATAR_SIZE.DEFAULT, CONST.AVATAR_SHAPE.CIRCLE)]}
                 />
             ),
             isSelected: selectedIntegration === integration.key,
@@ -183,7 +176,7 @@ function BaseOnboardingAccounting({shouldUseNativeStyles}: BaseOnboardingAccount
                 width={variables.iconSizeNormal}
                 height={variables.iconSizeNormal}
                 fill={theme.icon}
-                additionalStyles={[StyleUtils.getAvatarBorderStyle(CONST.AVATAR_SIZE.DEFAULT, CONST.AVATAR_SHAPE.CIRCLE), styles.mr3, styles.onboardingSmallIcon]}
+                additionalStyles={[StyleUtils.getAvatarBorderStyle(CONST.AVATAR_SIZE.DEFAULT, CONST.AVATAR_SHAPE.CIRCLE), styles.onboardingSmallIcon]}
             />
         ),
         isSelected: isOtherSelected,
@@ -241,23 +234,19 @@ function BaseOnboardingAccounting({shouldUseNativeStyles}: BaseOnboardingAccount
                 accessibilityLabel={item.text}
                 sentryLabel={CONST.SENTRY_LABEL.ONBOARDING.ACCOUNTING_SELECT_INTEGRATION}
                 accessible={false}
-                hoverStyle={styles.hoveredComponentBG}
-                style={[styles.onboardingAccountingItem, isSmallScreenWidth && styles.flexBasis100]}
+                hoverStyle={item.isSelected ? undefined : styles.hoveredComponentBG}
+                style={[styles.onboardingAccountingItem, isSmallScreenWidth && styles.onboardingAccountingItemNarrow, !!item.isSelected && styles.onboardingAccountingItemSelected]}
             >
-                <RadioButtonWithLabel
-                    isChecked={!!item.isSelected}
-                    onPress={() => handleIntegrationSelect(item.keyForList)}
-                    accessibilityLabel={item.text}
-                    style={[styles.flexRowReverse]}
-                    wrapperStyle={[styles.ml0]}
-                    labelElement={
-                        <View style={[styles.alignItemsCenter, styles.flexRow]}>
-                            {item.leftElement}
-                            <Text style={styles.textStrong}>{item.text}</Text>
-                        </View>
-                    }
-                    shouldBlendOpacity
-                />
+                <View style={[styles.flexRow, styles.alignSelfStretch, styles.mb2]}>
+                    <SelectionButton
+                        role={CONST.ROLE.CHECKBOX}
+                        isChecked={!!item.isSelected}
+                        onPress={() => handleIntegrationSelect(item.keyForList)}
+                        accessibilityLabel={item.text}
+                    />
+                </View>
+                {item.leftElement}
+                <Text style={[styles.textStrong, styles.textAlignCenter, styles.mt2]}>{item.text}</Text>
             </PressableWithoutFeedback>
         );
     }

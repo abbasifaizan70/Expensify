@@ -5676,12 +5676,26 @@ const staticStyles = (theme: ThemeColors) =>
         onboardingAccountingItem: {
             backgroundColor: theme.cardBG,
             borderRadius: variables.componentBorderRadiusNormal,
-            paddingHorizontal: 16,
-            paddingVertical: 20,
+            paddingHorizontal: 12,
+            paddingVertical: 12,
             flexGrow: 1,
             flexShrink: 1,
+            alignItems: 'center',
 
-            flexBasis: '35%',
+            // A 30% basis is what wraps the tiles into three columns on wide layouts: 32% would overflow the row once
+            // the gaps are counted, so the line would break after two tiles. flexGrow then fills the row, and maxWidth
+            // keeps a lone tile on the last row the same width as the column above instead of stretching across it.
+            flexBasis: '30%',
+            maxWidth: '32%',
+        },
+
+        onboardingAccountingItemNarrow: {
+            flexBasis: '45%',
+            maxWidth: '48.5%',
+        },
+
+        onboardingAccountingItemSelected: {
+            backgroundColor: theme.selectedOptionBG,
         },
 
         onboardingInterestedFeaturesItem: {

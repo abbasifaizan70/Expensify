@@ -159,7 +159,7 @@ describe('Onboarding interested features and accounting pages', () => {
 
         await waitForBatchedUpdatesWithAct();
         expect(screen.queryByText(TestHelper.translateLocal('onboarding.accounting.none'))).not.toBeOnTheScreen();
-        expect(screen.getByTestId('onboarding-accounting-wide-layout-spacer')).toHaveStyle({backgroundColor: 'transparent', flexBasis: '35%', flexGrow: 1});
+        expect(screen.getByTestId('onboarding-accounting-wide-layout-spacer')).toHaveStyle({backgroundColor: 'transparent', flexBasis: '30%', flexGrow: 1});
 
         fireEvent.press(screen.getByText(TestHelper.translateLocal('workspace.accounting.other')));
         const otherAccountingSoftwareLabel = TestHelper.translateLocal('onboarding.accounting.otherAccountingSoftware');
@@ -181,6 +181,32 @@ describe('Onboarding interested features and accounting pages', () => {
                 featuresMap: expect.arrayContaining([{id: CONST.POLICY.MORE_FEATURES.ARE_CONNECTIONS_ENABLED, enabled: true, enabledByDefault: true}]),
                 userReportedIntegration: 'other',
                 userReportedIntegrationName: 'Acme Books',
+            });
+        });
+    });
+
+    it('offers the integrations that ship in the product, labelled from the connections constant', async () => {
+        renderAccountingPage();
+
+        await waitForBatchedUpdatesWithAct();
+        const {NAME, NAME_USER_FRIENDLY, ACCOUNTING_INTEGRATION_ALIASES} = CONST.POLICY.CONNECTIONS;
+        [NAME.CERTINIA, NAME.RILLET, NAME.DUALENTRY, ACCOUNTING_INTEGRATION_ALIASES.INTUIT_ENTERPRISE_SUITE].forEach((connectionName) => {
+            expect(screen.getByText(NAME_USER_FRIENDLY[connectionName])).toBeOnTheScreen();
+        });
+    });
+
+    it('completes onboarding with a newly added integration', async () => {
+        renderAccountingPage();
+
+        await waitForBatchedUpdatesWithAct();
+        fireEvent.press(screen.getByText(CONST.POLICY.CONNECTIONS.NAME_USER_FRIENDLY[CONST.POLICY.CONNECTIONS.NAME.CERTINIA]));
+        fireEvent.press(screen.getByText(TestHelper.translateLocal('common.continue')));
+
+        await waitFor(() => {
+            expect(mockCompleteOnboardingFlow).toHaveBeenCalledWith({
+                featuresMap: expect.arrayContaining([{id: CONST.POLICY.MORE_FEATURES.ARE_CONNECTIONS_ENABLED, enabled: true, enabledByDefault: true}]),
+                userReportedIntegration: CONST.POLICY.CONNECTIONS.NAME.CERTINIA,
+                userReportedIntegrationName: undefined,
             });
         });
     });

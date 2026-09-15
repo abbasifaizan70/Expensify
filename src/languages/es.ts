@@ -3253,7 +3253,7 @@ ${amount} para ${merchant} - ${date}`,
             [CONST.ONBOARDING_COMPANY_SIZE.LARGE]: 'Más de 1,000 empleados',
         },
         accounting: {
-            title: '¿Utilizas algún software de contabilidad?',
+            title: '¿Qué software de contabilidad utilizas?',
             none: 'Ninguno',
             otherAccountingSoftware: 'Tu software de contabilidad',
         },

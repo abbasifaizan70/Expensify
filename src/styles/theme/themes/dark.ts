@@ -106,6 +106,7 @@ const darkTheme = {
     tooltipSupportingText: colors.productLight800,
     tooltipPrimaryText: colors.productLight900,
     trialBannerBackgroundColor: colors.green700,
+    selectedOptionBG: colors.green700,
     widgetIconBG: colors.green100,
     widgetIconFill: colors.green500,
     skeletonLHNIn: colors.productDark400,
