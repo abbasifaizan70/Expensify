@@ -11,17 +11,23 @@ import type {SubPageProps} from '@hooks/useSubPage/types';
 import useThemeStyles from '@hooks/useThemeStyles';
 
 import {addPersonalBankAccount, clearPersonalBankAccount} from '@libs/actions/BankAccounts';
+import {setDraftValues} from '@libs/actions/FormActions';
 import {continueSetup} from '@libs/actions/PaymentMethods';
 import {updateCurrentStep} from '@libs/actions/Wallet';
 
 import Navigation from '@navigation/Navigation';
 
+import Address from '@pages/EnablePayments/Wallet/PersonalInfo/substeps/AddressStep';
+import LegalName from '@pages/EnablePayments/Wallet/PersonalInfo/substeps/LegalNameStep';
+import getSubstepValues from '@pages/EnablePayments/Wallet/utils/getSubstepValues';
+import getWalletOwnerDetails, {hasCompleteAddress, hasCompleteLegalName} from '@pages/EnablePayments/Wallet/utils/getWalletOwnerDetails';
 import useIsBankAccountAdded from '@pages/EnablePayments/Wallet/utils/useIsBankAccountAdded';
 
 import CONST from '@src/CONST';
 import type {EnablePaymentsSubPageType} from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
+import INPUT_IDS from '@src/types/form/WalletAdditionalDetailsForm';
 
 import React, {useCallback, useContext} from 'react';
 import {View} from 'react-native';
@@ -31,9 +37,14 @@ import Confirmation from './substeps/ConfirmationStep';
 import Plaid from './substeps/PlaidStep';
 
 const ADD_BANK_ACCOUNT_SUB_PAGES = CONST.ENABLE_PAYMENTS.ADD_BANK_ACCOUNT_STEP.SUB_PAGE_NAMES;
+const PERSONAL_INFO_STEP_KEYS = INPUT_IDS.PERSONAL_INFO_STEP;
 
+// Legal name and address are collected before the bank account is created, so an account is never left without them.
+// These are the wallet KYC pages themselves: US only (state picker, no country picker), and they save into the form KYC reads.
 const plaidPages = [
     {pageName: ADD_BANK_ACCOUNT_SUB_PAGES.PLAID, component: Plaid},
+    {pageName: ADD_BANK_ACCOUNT_SUB_PAGES.LEGAL_NAME, component: LegalName},
+    {pageName: ADD_BANK_ACCOUNT_SUB_PAGES.ADDRESS, component: Address},
     {pageName: ADD_BANK_ACCOUNT_SUB_PAGES.CONFIRMATION, component: Confirmation},
 ];
 
@@ -44,6 +55,9 @@ function AddBankAccount() {
     const [personalBankAccount] = useOnyx(ONYXKEYS.PERSONAL_BANK_ACCOUNT);
     const [personalBankAccountDraft] = useOnyx(ONYXKEYS.FORMS.PERSONAL_BANK_ACCOUNT_FORM_DRAFT);
     const [personalPolicyID] = useOnyx(ONYXKEYS.PERSONAL_POLICY_ID);
+    const [privatePersonalDetails] = useOnyx(ONYXKEYS.PRIVATE_PERSONAL_DETAILS);
+    const [walletAdditionalDetails] = useOnyx(ONYXKEYS.WALLET_ADDITIONAL_DETAILS);
+    const [walletAdditionalDetailsDraft] = useOnyx(ONYXKEYS.FORMS.WALLET_ADDITIONAL_DETAILS_DRAFT);
     const {translate} = useLocalize();
     const styles = useThemeStyles();
     const kycWallRef = useContext(KYCWallContext);
@@ -68,14 +82,45 @@ function AddBankAccount() {
                       ...selectedPlaidBankAccount,
                       plaidAccessToken: plaidData?.plaidAccessToken ?? '',
                   };
-            addPersonalBankAccount(bankAccountWithToken, personalPolicyID);
+            const ownerDetails = getWalletOwnerDetails(getSubstepValues(PERSONAL_INFO_STEP_KEYS, walletAdditionalDetailsDraft, walletAdditionalDetails), privatePersonalDetails);
+
+            // Hand the same name and address to the KYC step, so it doesn't ask for them again
+            setDraftValues(ONYXKEYS.FORMS.WALLET_ADDITIONAL_DETAILS, {
+                [PERSONAL_INFO_STEP_KEYS.FIRST_NAME]: ownerDetails.legalFirstName,
+                [PERSONAL_INFO_STEP_KEYS.LAST_NAME]: ownerDetails.legalLastName,
+                [PERSONAL_INFO_STEP_KEYS.STREET]: ownerDetails.addressStreet,
+                [PERSONAL_INFO_STEP_KEYS.CITY]: ownerDetails.addressCity,
+                [PERSONAL_INFO_STEP_KEYS.STATE]: ownerDetails.addressState,
+                [PERSONAL_INFO_STEP_KEYS.ZIP_CODE]: ownerDetails.addressZipCode,
+            });
+            addPersonalBankAccount({...bankAccountWithToken, ...ownerDetails, country: CONST.COUNTRY.US}, personalPolicyID);
         }
-    }, [isBankAccountAlreadyAdded, personalBankAccountDraft?.plaidAccountID, plaidData?.bankAccounts, plaidData?.plaidAccessToken, personalPolicyID]);
+    }, [
+        isBankAccountAlreadyAdded,
+        personalBankAccountDraft?.plaidAccountID,
+        plaidData?.bankAccounts,
+        plaidData?.plaidAccessToken,
+        personalPolicyID,
+        walletAdditionalDetailsDraft,
+        walletAdditionalDetails,
+        privatePersonalDetails,
+    ]);
+
+    // Skip based on saved data only, not the draft, so a page isn't skipped while the user is still typing on it
+    const savedOwnerDetails = getWalletOwnerDetails(getSubstepValues(PERSONAL_INFO_STEP_KEYS, undefined, walletAdditionalDetails), privatePersonalDetails);
+    const skipPages: EnablePaymentsSubPageType[] = [];
+    if (hasCompleteLegalName(savedOwnerDetails)) {
+        skipPages.push(ADD_BANK_ACCOUNT_SUB_PAGES.LEGAL_NAME);
+    }
+    if (hasCompleteAddress(savedOwnerDetails)) {
+        skipPages.push(ADD_BANK_ACCOUNT_SUB_PAGES.ADDRESS);
+    }
 
     const isSetupTypeChosen = personalBankAccountDraft?.setupType === CONST.BANK_ACCOUNT.SETUP_TYPE.PLAID;
 
     const {CurrentPage, isEditing, pageIndex, nextPage, prevPage, moveTo, isRedirecting} = useSubPage<SubPageProps, EnablePaymentsSubPageType>({
         pages: plaidPages,
+        skipPages,
         // Once the bank account is added there is nothing to redo on the Plaid sub-page, so a revisit shows only the confirmation.
         startFrom: isBankAccountAlreadyAdded ? confirmationPageIndex : 0,
         onFinished: submit,
@@ -101,6 +146,12 @@ function AddBankAccount() {
         // The bank account is already added, so the confirmation is the only visible sub-page of this step — back exits the flow.
         if (isBankAccountAlreadyAdded) {
             Navigation.goBack(ROUTES.SETTINGS_WALLET);
+            return;
+        }
+
+        // Editing a page from the confirmation goes back to the confirmation
+        if (isEditing) {
+            moveTo(confirmationPageIndex, false);
             return;
         }
 

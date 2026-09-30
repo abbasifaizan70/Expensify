@@ -11,6 +11,7 @@ import IdologyQuestions from '@pages/EnablePayments/shared/IdologyQuestions';
 import useWalletPhoneValidateCode from '@pages/EnablePayments/shared/useWalletPhoneValidateCode';
 import getInitialSubstepForPersonalInfo from '@pages/EnablePayments/Wallet/utils/getInitialSubstepForPersonalInfo';
 import getSubstepValues from '@pages/EnablePayments/Wallet/utils/getSubstepValues';
+import {hasCompleteAddress, hasCompleteLegalName} from '@pages/EnablePayments/Wallet/utils/getWalletOwnerDetails';
 
 import {setAdditionalDetailsQuestions, updateCurrentStep} from '@userActions/Wallet';
 
@@ -20,7 +21,7 @@ import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
 import INPUT_IDS from '@src/types/form/WalletAdditionalDetailsForm';
 
-import {useMemo} from 'react';
+import {useMemo, useState} from 'react';
 
 import Address from './substeps/AddressStep';
 import Confirmation from './substeps/ConfirmationStep';
@@ -59,9 +60,25 @@ function PersonalInfoPage() {
 
     const startFrom = useMemo(() => getInitialSubstepForPersonalInfo(values), [values]);
 
+    // The Add bank account step already collects the legal name and address, so don't ask for them again.
+    // Decided once when the step opens: a page the user is filling in here must not become skipped while they type,
+    // or Back from the next page would jump over it.
+    const [skipPages] = useState(() => {
+        const pagesToSkip: EnablePaymentsSubPageType[] = [];
+        if (hasCompleteLegalName(values)) {
+            pagesToSkip.push(PERSONAL_INFO_SUB_PAGES.LEGAL_NAME);
+        }
+        if (hasCompleteAddress(values)) {
+            pagesToSkip.push(PERSONAL_INFO_SUB_PAGES.ADDRESS);
+        }
+        return pagesToSkip;
+    });
+    const firstVisiblePageIndex = formPages.findIndex((page) => !skipPages.includes(page.pageName));
+
     const {CurrentPage, isEditing, pageIndex, nextPage, prevPage, moveTo, isRedirecting} = useSubPage<SubPageProps, EnablePaymentsSubPageType>({
         pages: formPages,
         startFrom,
+        skipPages,
         onFinished: submit,
         buildRoute: (pageName, action) =>
             ROUTES.SETTINGS_ENABLE_PAYMENTS.getRoute({
@@ -82,7 +99,7 @@ function PersonalInfoPage() {
             return;
         }
 
-        if (pageIndex === 0) {
+        if (pageIndex <= firstVisiblePageIndex) {
             // Step back to the Add Bank Account step; the URL correction in EnablePaymentsPage navigates there.
             updateCurrentStep(CONST.WALLET.STEP.ADD_BANK_ACCOUNT);
             return;

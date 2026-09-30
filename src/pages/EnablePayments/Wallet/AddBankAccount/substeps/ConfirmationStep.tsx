@@ -12,11 +12,14 @@ import useThemeStyles from '@hooks/useThemeStyles';
 
 import {getLatestErrorMessage} from '@libs/ErrorUtils';
 
+import getSubstepValues from '@pages/EnablePayments/Wallet/utils/getSubstepValues';
+import getWalletOwnerDetails from '@pages/EnablePayments/Wallet/utils/getWalletOwnerDetails';
 import useIsBankAccountAdded from '@pages/EnablePayments/Wallet/utils/useIsBankAccountAdded';
 
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import INPUT_IDS from '@src/types/form/PersonalBankAccountForm';
+import WALLET_INPUT_IDS from '@src/types/form/WalletAdditionalDetailsForm';
 
 import React from 'react';
 import {View} from 'react-native';
@@ -25,6 +28,7 @@ type ConfirmationStepProps = SubPageProps;
 
 const BANK_INFO_STEP_KEYS = INPUT_IDS.BANK_INFO_STEP;
 const BANK_INFO_STEP_INDEXES = CONST.WALLET.SUBSTEP_INDEXES.BANK_ACCOUNT;
+const PERSONAL_INFO_STEP_KEYS = WALLET_INPUT_IDS.PERSONAL_INFO_STEP;
 
 function ConfirmationStep({onNext, onMove}: ConfirmationStepProps) {
     const {translate} = useLocalize();
@@ -32,7 +36,14 @@ function ConfirmationStep({onNext, onMove}: ConfirmationStepProps) {
     const {isOffline} = useNetwork();
     const [personalBankAccountDraft] = useOnyx(ONYXKEYS.FORMS.PERSONAL_BANK_ACCOUNT_FORM_DRAFT);
     const [personalBankAccount] = useOnyx(ONYXKEYS.PERSONAL_BANK_ACCOUNT);
+    const [privatePersonalDetails] = useOnyx(ONYXKEYS.PRIVATE_PERSONAL_DETAILS);
+    const [walletAdditionalDetails] = useOnyx(ONYXKEYS.WALLET_ADDITIONAL_DETAILS);
+    const [walletAdditionalDetailsDraft] = useOnyx(ONYXKEYS.FORMS.WALLET_ADDITIONAL_DETAILS_DRAFT);
     const {isBankAccountAdded, addedBankAccount} = useIsBankAccountAdded();
+
+    const ownerDetails = getWalletOwnerDetails(getSubstepValues(PERSONAL_INFO_STEP_KEYS, walletAdditionalDetailsDraft, walletAdditionalDetails), privatePersonalDetails);
+    const legalName = `${ownerDetails.legalFirstName} ${ownerDetails.legalLastName}`;
+    const address = `${ownerDetails.addressStreet}, ${ownerDetails.addressCity}, ${ownerDetails.addressState} ${ownerDetails.addressZipCode}`;
 
     const isLoading = personalBankAccount?.isLoading ?? false;
     const error = getLatestErrorMessage(personalBankAccount ?? {});
@@ -65,6 +76,32 @@ function ConfirmationStep({onNext, onMove}: ConfirmationStepProps) {
                     )}
                 </MenuItem.Row>
             </MenuItem.Root>
+            {!isBankAccountAdded && (
+                <>
+                    <MenuItem.Root onPress={() => onMove(BANK_INFO_STEP_INDEXES.LEGAL_NAME)}>
+                        <MenuItem.Row>
+                            <MenuItem.Content>
+                                <MenuItem.FieldName>{translate('personalInfoStep.legalName')}</MenuItem.FieldName>
+                                <MenuItem.FieldValue>{legalName}</MenuItem.FieldValue>
+                            </MenuItem.Content>
+                            <MenuItem.Trailing>
+                                <MenuItem.Chevron />
+                            </MenuItem.Trailing>
+                        </MenuItem.Row>
+                    </MenuItem.Root>
+                    <MenuItem.Root onPress={() => onMove(BANK_INFO_STEP_INDEXES.ADDRESS)}>
+                        <MenuItem.Row>
+                            <MenuItem.Content>
+                                <MenuItem.FieldName>{translate('personalInfoStep.address')}</MenuItem.FieldName>
+                                <MenuItem.FieldValue>{address}</MenuItem.FieldValue>
+                            </MenuItem.Content>
+                            <MenuItem.Trailing>
+                                <MenuItem.Chevron />
+                            </MenuItem.Trailing>
+                        </MenuItem.Row>
+                    </MenuItem.Root>
+                </>
+            )}
             <View style={[styles.ph5, styles.pb5, styles.flexGrow1, styles.justifyContentEnd]}>
                 {!!error && error.length > 0 && (
                     <DotIndicatorMessage
