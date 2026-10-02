@@ -4642,7 +4642,11 @@ function getReasonAndReportActionThatRequiresAttention(
     const actionTypeForAssigneeToComplete = getActionTypeForAssigneeToComplete(optionOrReport, parentReportAction);
 
     // Compute IOU candidate upfront so we can compare timestamps with task candidate
-    const {reportAction: iouReportActionToApproveOrPay, actionBadge} = getIOUReportActionWithBadge(
+    const {
+        reportAction: iouReportActionToApproveOrPay,
+        actionBadge,
+        isExcludedForHeldExpenses,
+    } = getIOUReportActionWithBadge(
         optionOrReport,
         policy,
         optionReportMetadata,
@@ -4663,7 +4667,8 @@ function getReasonAndReportActionThatRequiresAttention(
     // This only has to run on the fallback path: when a candidate was found, getBadgeFromIOUReport has already applied
     // the same exclusion while picking it, so the chat is known to have an actionable child even when a sibling of that
     // child is fully held.
-    const isFallbackReportExcludedForHeldExpenses = !iouReportActionToApproveOrPay && isReportExcludedForHeldExpenses(iouReport, transactions, iouReportActions, currentUserAccountID);
+    const isFallbackReportExcludedForHeldExpenses =
+        !iouReportActionToApproveOrPay && (isExcludedForHeldExpenses || isReportExcludedForHeldExpenses(iouReport, transactions, iouReportActions, currentUserAccountID));
 
     // Has a child report that is awaiting action (e.g. approve, pay, add bank account) from current user.
     // A report whose only expenses are pending Expensify Card transactions can't be actioned until they post, so it
@@ -4677,7 +4682,7 @@ function getReasonAndReportActionThatRequiresAttention(
     if (actionTypeForAssigneeToComplete) {
         const isAssigneeExpenseAction = actionTypeForAssigneeToComplete === CONST.REPORT.ACTION_TYPES_FOR_ASSIGNEE_TO_COMPLETE.EXPENSE;
         if (isAssigneeExpenseAction) {
-            const assigneeBadge = getBadgeFromIOUReport(
+            const {actionBadge: assigneeBadge} = getBadgeFromIOUReport(
                 optionOrReport,
                 undefined,
                 policy,

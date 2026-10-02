@@ -4326,6 +4326,129 @@ describe('ReportUtils', () => {
                 return policyExpenseChat;
             };
 
+            const seedHeldPreview = async (holderAccountID = otherUserAccountID) => {
+                const seeded = await seedHeldChildExpense(holderAccountID, {transactionCount: 1});
+                const chat = {...seeded, ownerAccountID: otherUserAccountID, iouReportID: undefined};
+                await Onyx.merge(`${ONYXKEYS.COLLECTION.POLICY}1`, {
+                    id: '1',
+                    type: CONST.POLICY.TYPE.TEAM,
+                    role: CONST.POLICY.ROLE.ADMIN,
+                    approvalMode: CONST.POLICY.APPROVAL_MODE.BASIC,
+                });
+                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chat.reportID}`, {
+                    preview_7201: {
+                        reportActionID: 'preview_7201',
+                        actionName: CONST.REPORT.ACTIONS.TYPE.REPORT_PREVIEW,
+                        created: '2024-01-01 00:00:00.000',
+                        actorAccountID: otherUserAccountID,
+                        childReportID: expenseReportID,
+                        childManagerAccountID: currentUserAccountID,
+                        shouldShow: true,
+                        message: [{type: 'COMMENT', html: 'Expense report', text: 'Expense report'}],
+                        originalMessage: {linkedReportID: expenseReportID},
+                    },
+                });
+                await waitForBatchedUpdates();
+                return chat;
+            };
+
+            it.each([false, true])('excludes a held preview with a missing chat pointer and outstanding flag %s', async (outstanding) => {
+                // Given a loaded held child and a parent whose fallback pointer is missing.
+                const chat = {...(await seedHeldPreview()), hasOutstandingChildRequest: outstanding};
+
+                // When the actual attention function evaluates the parent without opening it.
+                const attention = getReasonAndReportActionThatRequiresAttention(chat, currentUserEmail, currentUserAccountID);
+
+                // Then the child's exclusion survives even if the parent's server flag is still true.
+                expect(attention).toBeNull();
+            });
+
+            it('excludes held previews when the chat points to an unrelated empty draft', async () => {
+                // Given a submitted held report alongside a new empty draft belonging to the employee.
+                const chat = {...(await seedHeldPreview()), iouReportID: '7299'};
+                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}7299`, {
+                    reportID: '7299',
+                    type: CONST.REPORT.TYPE.EXPENSE,
+                    ownerAccountID: otherUserAccountID,
+                    stateNum: CONST.REPORT.STATE_NUM.OPEN,
+                    statusNum: CONST.REPORT.STATUS_NUM.OPEN,
+                    transactionCount: 0,
+                });
+                await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chat.reportID}`, {
+                    draft_preview: {
+                        reportActionID: 'draft_preview',
+                        shouldShow: true,
+                        message: [{type: 'COMMENT', html: 'Expense report', text: 'Expense report'}],
+                        actionName: CONST.REPORT.ACTIONS.TYPE.REPORT_PREVIEW,
+                        actorAccountID: otherUserAccountID,
+                        childReportID: '7299',
+                        created: '2024-01-02 00:00:00.000',
+                    },
+                });
+                await waitForBatchedUpdates();
+
+                // When the fallback pointer targets the empty draft rather than the held submitted report.
+                const attention = getReasonAndReportActionThatRequiresAttention(chat, currentUserEmail, currentUserAccountID);
+
+                // Then the employee's draft must not restore attention for the approver.
+                expect(attention).toBeNull();
+            });
+
+            it.each(['unloaded child', 'partial transactions', 'missing transaction'])('preserves the fallback with %s', async (missingData) => {
+                // Given a held candidate whose siblings or hold data cannot be fully evaluated yet.
+                const chat = await seedHeldPreview();
+                if (missingData === 'unloaded child') {
+                    await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chat.reportID}`, {
+                        unloaded_preview: {
+                            reportActionID: 'unloaded_preview',
+                            shouldShow: true,
+                            message: [{type: 'COMMENT', html: 'Expense report', text: 'Expense report'}],
+                            actionName: CONST.REPORT.ACTIONS.TYPE.REPORT_PREVIEW,
+                            actorAccountID: otherUserAccountID,
+                            childReportID: '7298',
+                            created: '2024-01-02 00:00:00.000',
+                        },
+                    });
+                } else if (missingData === 'partial transactions') {
+                    await Onyx.merge(`${ONYXKEYS.COLLECTION.REPORT}${expenseReportID}`, {transactionCount: 2});
+                } else {
+                    await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, null);
+                }
+                await waitForBatchedUpdates();
+
+                // When the parent is evaluated before the missing data arrives.
+                const attention = getReasonAndReportActionThatRequiresAttention(chat, currentUserEmail, currentUserAccountID);
+
+                // Then incomplete local data must not suppress the server's outstanding-child fallback.
+                expect(attention?.reason).toBe(CONST.REQUIRES_ATTENTION_REASONS.HAS_CHILD_REPORT_AWAITING_ACTION);
+            });
+
+            it('restores the approve badge when the employee removes the hold', async () => {
+                // Given a parent with a missing fallback pointer and a fully held child.
+                const chat = await seedHeldPreview();
+                expect(getReasonAndReportActionThatRequiresAttention(chat, currentUserEmail, currentUserAccountID)).toBeNull();
+
+                // When the employee removes the hold through an Onyx transaction update.
+                await Onyx.merge(`${ONYXKEYS.COLLECTION.TRANSACTION}${transactionID}`, {comment: {hold: null}});
+                await waitForBatchedUpdates();
+
+                // Then the real preview becomes actionable again without updating the parent report.
+                const attention = getReasonAndReportActionThatRequiresAttention(chat, currentUserEmail, currentUserAccountID);
+                expect(attention?.actionBadge).toBe(CONST.REPORT.ACTION_BADGE.APPROVE);
+                expect(attention?.reportAction?.childReportID).toBe(expenseReportID);
+            });
+
+            it('keeps the held preview actionable for the user who placed the hold', async () => {
+                // Given a current-user hold and no fallback report pointer.
+                const chat = await seedHeldPreview(currentUserAccountID);
+
+                // When that same approver views their To-do queue.
+                const attention = getReasonAndReportActionThatRequiresAttention(chat, currentUserEmail, currentUserAccountID);
+
+                // Then they still have an action because they can remove their own hold.
+                expect(attention?.actionBadge).toBe(CONST.REPORT.ACTION_BADGE.APPROVE);
+            });
+
             it('does not require attention when another user placed the hold', async () => {
                 const policyExpenseChat = await seedHeldChildExpense(otherUserAccountID);
 

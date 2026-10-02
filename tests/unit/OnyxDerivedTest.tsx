@@ -187,6 +187,24 @@ describe('OnyxDerived', () => {
             statusNum: CONST.REPORT.STATUS_NUM.OPEN,
         };
 
+        it('clears parent attention when an Onyx update changes its flag to false', async () => {
+            // Given a parent workspace chat whose outstanding-child fallback currently creates a green dot.
+            const chat = {...mockReport, reportID: '102525_chat', chatType: CONST.REPORT.CHAT_TYPE.POLICY_EXPENSE_CHAT, ownerAccountID: 99, hasOutstandingChildRequest: true};
+            await Onyx.set(ONYXKEYS.SESSION, {accountID: 5, email: 'approver@example.com'});
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${chat.reportID}`, chat);
+            await waitForBatchedUpdates();
+            const before = await OnyxUtils.get(ONYXKEYS.DERIVED.REPORT_ATTRIBUTES);
+            expect(before?.reports[chat.reportID].requiresAttention).toBe(true);
+
+            // When a server-style update changes the parent flag to false without opening the report.
+            await Onyx.update([{onyxMethod: Onyx.METHOD.MERGE, key: `${ONYXKEYS.COLLECTION.REPORT}${chat.reportID}`, value: {hasOutstandingChildRequest: false}}]);
+            await waitForBatchedUpdates();
+
+            // Then the actual derived-state subscriptions must clear the attention flag.
+            const after = await OnyxUtils.get(ONYXKEYS.DERIVED.REPORT_ATTRIBUTES);
+            expect(after?.reports[chat.reportID].requiresAttention).toBe(false);
+        });
+
         it('returns empty reports when dependencies are not set', async () => {
             await waitForBatchedUpdates();
             const derivedReportAttributes = await OnyxUtils.get(ONYXKEYS.DERIVED.REPORT_ATTRIBUTES);

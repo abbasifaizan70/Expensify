@@ -328,11 +328,16 @@ function getBadgeFromIOUReport(
     currentUserLogin: string,
     currentUserAccountID: number,
     iouReportActions: OnyxEntry<OnyxTypes.ReportActions>,
-): ValueOf<typeof CONST.REPORT.ACTION_BADGE> | undefined {
+): {
+    actionBadge?: ValueOf<typeof CONST.REPORT.ACTION_BADGE>;
+    isExcludedForHeldExpenses?: boolean;
+} {
     const reportTransactions = getReportTransactions(iouReport?.reportID);
 
     if (isReportExcludedForHeldExpenses(iouReport, reportTransactions, iouReportActions, currentUserAccountID)) {
-        return undefined;
+        // Only a complete hold verdict can override the parent chat's outstanding-child fallback.
+        const hasAllTransactions = iouReport?.transactionCount !== undefined && iouReport.transactionCount === reportTransactions.length && reportTransactions.length > 0;
+        return {isExcludedForHeldExpenses: hasAllTransactions};
     }
 
     // TODO: https://github.com/Expensify/App/issues/66518
@@ -344,7 +349,7 @@ function getBadgeFromIOUReport(
         (isInvoiceReportReportUtils(iouReport) || isReportPayer) &&
         canIOUBePaid(iouReport, chatReport, policy, undefined, currentUserLogin, currentUserAccountID, undefined, false, isChatReportArchived, invoiceReceiverPolicy);
     if (canBePaidNow) {
-        return CONST.REPORT.ACTION_BADGE.PAY;
+        return {actionBadge: CONST.REPORT.ACTION_BADGE.PAY};
     }
     // Pay-elsewhere path: covers negative reimbursable spend (mark-as-paid flow for credits).
     // Skip the PAY badge when every expense is non-reimbursable — paying is optional and
@@ -354,10 +359,10 @@ function getBadgeFromIOUReport(
         (isInvoiceReportReportUtils(iouReport) || canPayElsewhereActor) &&
         canIOUBePaid(iouReport, chatReport, policy, undefined, currentUserLogin, currentUserAccountID, undefined, true, isChatReportArchived, invoiceReceiverPolicy);
     if (canBePaidElsewhere) {
-        return hasOnlyNonReimbursableTransactions(iouReport?.reportID) ? undefined : CONST.REPORT.ACTION_BADGE.PAY;
+        return {actionBadge: hasOnlyNonReimbursableTransactions(iouReport?.reportID) ? undefined : CONST.REPORT.ACTION_BADGE.PAY};
     }
     if (canApproveIOU(iouReport, policy, reportMetadata, currentUserAccountID)) {
-        return CONST.REPORT.ACTION_BADGE.APPROVE;
+        return {actionBadge: CONST.REPORT.ACTION_BADGE.APPROVE};
     }
     const isWaitingSubmitFromCurrentUser = canSubmitAndIsAwaitingForCurrentUser(
         iouReport,
@@ -374,9 +379,9 @@ function getBadgeFromIOUReport(
         iouReportActions,
     );
     if (isWaitingSubmitFromCurrentUser) {
-        return CONST.REPORT.ACTION_BADGE.SUBMIT;
+        return {actionBadge: CONST.REPORT.ACTION_BADGE.SUBMIT};
     }
-    return undefined;
+    return {};
 }
 
 /**
@@ -406,9 +411,12 @@ function getIOUReportActionWithBadge(
 ): {
     reportAction: OnyxEntry<ReportAction>;
     actionBadge?: ValueOf<typeof CONST.REPORT.ACTION_BADGE>;
+    isExcludedForHeldExpenses: boolean;
 } {
     let actionBadge: ValueOf<typeof CONST.REPORT.ACTION_BADGE> | undefined;
     let earliestAction: ReportAction | undefined;
+    let hasHeldCandidate = false;
+    let hasUnresolvedCandidate = false;
 
     for (const action of Object.values(chatReportActions ?? {})) {
         if (action?.actionName !== CONST.REPORT.ACTIONS.TYPE.REPORT_PREVIEW || isDeletedAction(action)) {
@@ -425,6 +433,8 @@ function getIOUReportActionWithBadge(
         }
 
         if (!iouReport) {
+            // A loaded held sibling cannot disprove the outstanding-child flag for an unloaded report.
+            hasUnresolvedCandidate = true;
             // Fallback for p2p IOUs when the IOU report isn't loaded in Onyx yet (e.g. right after login).
             // Use the REPORTPREVIEW action's child* fields to determine PAY badge without the full report.
             if (chatReport?.hasOutstandingChildRequest && canPayIOUFromReportAction(action, chatReport, currentUserAccountID)) {
@@ -436,12 +446,34 @@ function getIOUReportActionWithBadge(
             continue;
         }
 
-        const iouReportActions = allReportActions?.[`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${iouReport.reportID}`];
+        const iouReportActions = allReportActions?.[`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${iouReport.reportID}`] ?? getAllReportActions(iouReport.reportID);
 
         // An all-held report yields no badge, so it can't win the "oldest action" race and hide a sibling report that
         // still needs action from the current user.
-        const badge = getBadgeFromIOUReport(iouReport, chatReport, policy, reportMetadata, invoiceReceiverPolicy, currentUserLogin, currentUserAccountID, iouReportActions);
+        const {actionBadge: badge, isExcludedForHeldExpenses} = getBadgeFromIOUReport(
+            iouReport,
+            chatReport,
+            policy,
+            reportMetadata,
+            invoiceReceiverPolicy,
+            currentUserLogin,
+            currentUserAccountID,
+            iouReportActions,
+        );
         if (!badge) {
+            // Settled reports and another user's drafts cannot explain this user's outstanding-child flag.
+            const isUnrelatedDraft = isOpenExpenseReportReportUtils(iouReport) && iouReport.ownerAccountID !== currentUserAccountID;
+            const isFinished = isSettled(iouReport) || (isClosedReportUtil(iouReport) && !iouReport.isWaitingOnBankAccount);
+            if (isUnrelatedDraft || isFinished) {
+                continue;
+            }
+
+            if (isExcludedForHeldExpenses) {
+                hasHeldCandidate = true;
+            } else {
+                // Keep the server fallback when an outstanding sibling or its transactions cannot be evaluated yet.
+                hasUnresolvedCandidate = true;
+            }
             continue;
         }
 
@@ -451,7 +483,7 @@ function getIOUReportActionWithBadge(
         }
     }
 
-    return {reportAction: earliestAction, actionBadge};
+    return {reportAction: earliestAction, actionBadge, isExcludedForHeldExpenses: hasHeldCandidate && !hasUnresolvedCandidate};
 }
 
 /**
