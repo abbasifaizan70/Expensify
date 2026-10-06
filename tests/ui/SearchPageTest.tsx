@@ -589,6 +589,35 @@ describe('SearchPageNarrow', () => {
         // Then the return refreshes it again, because the page's request on the first visit must not leave a claim that silences this mount
         expect(firstPageCallCount()).toBeGreaterThan(callsAfterFirstVisit);
     });
+    it('retries a query that failed on this page mount when the user comes back to it', async () => {
+        // Given the page requested a query that failed without a server response
+        const page = renderPage();
+        await act(async () => {
+            jest.runAllTimers();
+        });
+        await setFailedSnapshot(CONST.JSON_CODE.NO_RESPONSE);
+        expect(screen.getByText('Refresh needed')).toBeTruthy();
+        const failedQueryCallCount = () => mockSearch.mock.calls.filter(([params]) => params?.queryJSON?.hash === failedQueryJSON?.hash && params?.offset === 0).length;
+        const callsBeforeLeaving = failedQueryCallCount();
+
+        // When the user switches to another tab and back, which on narrow layout only swaps the query under the same page
+        mockSearchQueryParam.mockReturnValue(EXPENSE_QUERY);
+        await act(async () => {
+            page.rerender(getSearchPage(EXPENSE_QUERY));
+            jest.runAllTimers();
+        });
+        mockSearchQueryParam.mockReturnValue(FAILED_QUERY);
+        await act(async () => {
+            page.rerender(getSearchPage(FAILED_QUERY));
+            jest.runAllTimers();
+        });
+
+        // Then the failed query is requested again and the error view is gone, because the page never remounts on a tab
+        // switch and without a fresh attempt per visit the tab stays on "Refresh needed" until a manual Refresh
+        expect(failedQueryCallCount()).toBeGreaterThan(callsBeforeLeaving);
+        expect(screen.queryByText('Refresh needed')).toBeNull();
+    });
+
     it('still refreshes on reconnect even though the page claimed the first request', async () => {
         // Given a claim on the first page that no mount has read yet
         mockSearchQueryParam.mockReturnValue(EXPENSE_QUERY);

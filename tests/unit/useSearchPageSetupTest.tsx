@@ -247,18 +247,40 @@ describe('useSearchPageSetup', () => {
         expect(getClearedHashes()).toEqual([]);
     });
 
-    it('tracks the clear per hash', () => {
+    it('tracks the clear per visit', () => {
         // Given an errored query that has already been cleared
         mockSearchResults = buildErroredSnapshot(queryJSON?.hash ?? 0);
         const {rerender} = renderHook(({queryJSON: currentQueryJSON}) => useSearchPageSetup(currentQueryJSON), {initialProps: {queryJSON}});
 
-        // When a second, independently errored query opens and the first one is returned to
+        // When a second, independently errored query opens and the first one is returned to while still errored
         mockSearchResults = buildErroredSnapshot(queryJSONB?.hash ?? 0);
         rerender({queryJSON: queryJSONB});
         mockSearchResults = buildErroredSnapshot(queryJSON?.hash ?? 0);
         rerender({queryJSON});
 
-        // Then each query got exactly one clear, so switching back and forth cannot re-request forever
-        expect(getClearedHashes()).toEqual([queryJSON?.hash, queryJSONB?.hash]);
+        // Then the first query is cleared again, because on narrow layout a tab switch never remounts the page and
+        // without a fresh attempt per visit a tab that failed earlier stays on the error view for good
+        expect(getClearedHashes()).toEqual([queryJSON?.hash, queryJSONB?.hash, queryJSON?.hash]);
+    });
+
+    it('does not clear the same hash twice within one visit', () => {
+        // Given an errored query whose clear on this visit was followed by a retry that failed again
+        mockSearchResults = buildErroredSnapshot(queryJSON?.hash ?? 0);
+        const {rerender} = renderHook(({queryJSON: currentQueryJSON}) => useSearchPageSetup(currentQueryJSON), {initialProps: {queryJSON}});
+        mockSearchResults = undefined;
+        rerender({queryJSON});
+        mockSearchResults = buildErroredSnapshot(queryJSON?.hash ?? 0);
+        mockSearchKey = CONST.SEARCH.SEARCH_KEYS.EXPENSES;
+        rerender({queryJSON});
+
+        // When the user moves to another query and then comes back
+        mockSearchResults = buildErroredSnapshot(queryJSONB?.hash ?? 0);
+        rerender({queryJSON: queryJSONB});
+        mockSearchResults = buildErroredSnapshot(queryJSON?.hash ?? 0);
+        rerender({queryJSON});
+
+        // Then the failed retry was left alone, so a query that keeps failing settles on the error view, and only the
+        // next visit gets one more attempt
+        expect(getClearedHashes()).toEqual([queryJSON?.hash, queryJSONB?.hash, queryJSON?.hash]);
     });
 });

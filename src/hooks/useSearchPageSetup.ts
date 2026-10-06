@@ -78,6 +78,16 @@ function useSearchPageSetup(queryJSON: Readonly<SearchQueryJSON> | undefined) {
     // and cases where route params change without a navigation event (e.g. sorting).
     useEffect(clearOnHashChange, [hash, clearSelectedTransactions]);
 
+    // Ownership of an error lasts for one visit to a query. A narrow-layout tab switch only swaps route params, so
+    // without this the page keeps owning every hash it ever requested and a tab that failed earlier is never retried.
+    // Runs before the fetch effect below, so a request that goes out in the same render still marks its own hash.
+    useEffect(() => {
+        if (hash === undefined) {
+            return;
+        }
+        requestedHashesRef.current.delete(hash);
+    }, [hash]);
+
     // Fire search() when the query changes (hash). This runs at the page level so the
     // API request starts in parallel with the skeleton, before Search mounts its 14+ useOnyx hooks.
     useEffect(() => {
