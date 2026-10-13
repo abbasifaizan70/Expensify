@@ -45,12 +45,12 @@
 
 ### [@react-navigation+stack+7.11.2+001+edge-drag-gesture.patch](@react-navigation+stack+7.11.2+001+edge-drag-gesture.patch)
 
-- Reason: Adds `edgeDragGestureMonitor` implementation
+- Reason: Skips the stack transition for a history navigation the browser already animated itself (the iOS Safari and Chrome Android swipe-back / swipe-forward gestures), so the dismissed screen is not painted on top of the destination a second time
 - Upstream PR/issue: N/A
-- E/App issue: [#15849](https://github.com/Expensify/App/issues/15849)
+- E/App issue: [#15849](https://github.com/Expensify/App/issues/15849) [#75905](https://github.com/Expensify/App/issues/75905)
 - PR Introducing Patch: [#18402](https://github.com/Expensify/App/pull/18402)
 - PR Updating Patch: [#22678](https://github.com/Expensify/App/pull/22678) [#22437](https://github.com/Expensify/App/pull/22437) [#64155](https://github.com/Expensify/App/pull/64155) [#101715](https://github.com/Expensify/App/issues/101715)
-- Note: Re-ported onto 7.11.2. The added and removed lines are unchanged. Only the surrounding context moved, because 7.10.x wrapped the gesture animation in `animationIdRef`/`isAnimatingRef` guards. 7.11.2 did not touch `Card.js` or `CardStack.js`, so the patch body is identical to the 7.11.1 one. `resetExpectingTouchendWithDelay()` still runs after those guards, so a stale animation callback that returns early no longer resets the monitor.
+- Note: Rewritten for #75905. The old `touchend.pageX < 0` detection no longer fires on current Safari, and the `duration: 0` it injected into `Card.js` was ignored by the spring `TransitionIOSSpec`, so the patch had been inert. `edgeDragGestureMonitor` now reads `PopStateEvent.hasUAVisualTransition` (Safari 18+, Chrome 118+) from a capture-phase `popstate` listener and keeps the flag for that task only. `StackView.getDerivedStateFromProps` consults it in `isAnimationEnabled`, which is the same path `animation: 'none'` takes, so the dismissed (or, after a forward swipe, the revealed) route settles in the same synchronous commit as the `popstate`. `Card.js` and `CardStack.js` are no longer touched by this patch.
 
 ### [@react-navigation+stack+7.11.2+002+dontDetachScreen.patch](@react-navigation+stack+7.11.2+002+dontDetachScreen.patch)
 - Reason: Prevents the second screen in the stack from being detached too early.  
