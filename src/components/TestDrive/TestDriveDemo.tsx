@@ -2,7 +2,6 @@ import FullPageOfflineBlockingView from '@components/BlockingViews/FullPageOffli
 import EmbeddedDemo from '@components/EmbeddedDemo';
 import Modal from '@components/Modal';
 import SafeAreaConsumer from '@components/SafeAreaConsumer';
-import {shouldOpenRHPVariant} from '@components/SidePanel/RHPVariantTest';
 
 import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useIsPaidPolicyAdmin from '@hooks/useIsPaidPolicyAdmin';
@@ -16,7 +15,6 @@ import useThemeStyles from '@hooks/useThemeStyles';
 import {openReport} from '@libs/actions/Report';
 import {completeTestDriveTask} from '@libs/actions/Task';
 import {setSelfTourViewed} from '@libs/actions/Welcome';
-import Log from '@libs/Log';
 import Navigation from '@libs/Navigation/Navigation';
 import TransitionTracker from '@libs/Navigation/TransitionTracker';
 import {isAdminRoom} from '@libs/ReportUtils';
@@ -122,10 +120,6 @@ function TestDriveDemo() {
             callback: () => {
                 Navigation.goBack();
 
-                if (shouldOpenRHPVariant()) {
-                    Log.hmmm('[TestDriveDemo] User was redirected to Workspace Editor, skipping navigation to admin room');
-                    return;
-                }
                 if (isAdminRoom(onboardingReport)) {
                     Navigation.navigate(ROUTES.REPORT_WITH_ID.getRoute(onboardingReport?.reportID));
                 }

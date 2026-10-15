@@ -275,4 +275,56 @@ describe('navigateAfterOnboarding', () => {
         expect(navigate).toHaveBeenCalledWith(ROUTES.HOME, undefined);
         expect(navigate).not.toHaveBeenCalledWith(ROUTES.REPORT_WITH_ID.getRoute(ONBOARDING_ADMINS_CHAT_REPORT_ID), undefined);
     });
+
+    it.each([
+        ['small', true],
+        ['large', false],
+    ])('should land Track intents on Home with the side panel closed on %s screens', async (_screen, isSmallScreenWidth) => {
+        // Given a Track workspace / Track personal user whose CompleteGuidedSetup response assigned the
+        // trackExpensesWithConcierge variant, which used to open the Concierge DM on small screens and the Concierge
+        // side panel next to Home on large screens
+        const navigate = jest.spyOn(Navigation, 'navigate');
+        const openSidePanel = jest.spyOn(SidePanelActions, 'openSidePanel');
+        mockFindLastAccessedReport.mockReturnValue(undefined);
+        await Onyx.set(ONYXKEYS.CONCIERGE_REPORT_ID, REPORT_ID);
+
+        // When onboarding finishes
+        navigateAfterOnboarding(isSmallScreenWidth, true, REPORT_ID, {}, ONBOARDING_POLICY_ID, undefined, false, {
+            variantOverride: CONST.ONBOARDING_RHP_VARIANT.TRACK_EXPENSES_WITH_CONCIERGE,
+        });
+        await waitForBatchedUpdates();
+
+        // Then the user lands on Home, where the Getting started section onboards them, and the side panel stays closed;
+        // the Concierge DM is only a tap away from Home but is not opened for them
+        expect(navigate).toHaveBeenCalledWith(ROUTES.HOME, undefined);
+        expect(navigate).not.toHaveBeenCalledWith(ROUTES.REPORT_WITH_ID.getRoute(REPORT_ID), undefined);
+        expect(openSidePanel).not.toHaveBeenCalled();
+        const sidePanel = await getOnyxValue(ONYXKEYS.NVP_SIDE_PANEL);
+        expect(sidePanel?.open).toBeFalsy();
+        expect(sidePanel?.openNarrowScreen).toBeFalsy();
+    });
+
+    it.each([CONST.ONBOARDING_RHP_VARIANT.RHP_CONCIERGE_DM, CONST.ONBOARDING_RHP_VARIANT.RHP_ADMINS_ROOM, CONST.ONBOARDING_RHP_VARIANT.RHP_HOME_PAGE])(
+        'should not open the side panel for the retired %s arm',
+        async (variant) => {
+            // Given a Manage my team admin from a micro company (the only size those arms ever applied to) whose account
+            // still carries one of the retired experiment arms
+            const navigate = jest.spyOn(Navigation, 'navigate');
+            const openSidePanel = jest.spyOn(SidePanelActions, 'openSidePanel');
+            await Onyx.set(ONYXKEYS.ONBOARDING_COMPANY_SIZE, CONST.ONBOARDING_COMPANY_SIZE.MICRO_SMALL);
+            await waitForBatchedUpdates();
+
+            // When onboarding finishes with that arm
+            navigateAfterOnboarding(false, true, '', {}, ONBOARDING_POLICY_ID, ONBOARDING_ADMINS_CHAT_REPORT_ID, false, {variantOverride: variant});
+            await waitForBatchedUpdates();
+
+            // Then the arm behaves like control: the admin room opens as a full report, nothing navigates to the workspace
+            // overview, and the side panel is never opened
+            expect(navigate).toHaveBeenCalledWith(ROUTES.REPORT_WITH_ID.getRoute(ONBOARDING_ADMINS_CHAT_REPORT_ID), undefined);
+            expect(navigate).not.toHaveBeenCalledWith(ROUTES.WORKSPACE_OVERVIEW.getRoute(ONBOARDING_POLICY_ID), undefined);
+            expect(openSidePanel).not.toHaveBeenCalled();
+            const sidePanel = await getOnyxValue(ONYXKEYS.NVP_SIDE_PANEL);
+            expect(sidePanel?.open).toBeFalsy();
+        },
+    );
 });

@@ -1,18 +1,15 @@
-import isSidePanelReportSupported from '@components/SidePanel/isSidePanelReportSupported';
-
 import Log from '@libs/Log';
 import {navigateAfterOnboardingWithMicrotaskQueue} from '@libs/navigateAfterOnboarding';
-import {isTrackOnboardingChoice} from '@libs/OnboardingUtils';
 import {createDisplayName} from '@libs/PersonalDetailsUtils';
 import {isPaidGroupPolicy, isPolicyAdmin} from '@libs/PolicyUtils';
 
 import {createWorkspace, generateDefaultWorkspaceName, generatePolicyID} from '@userActions/Policy/Policy';
-import {completeOnboarding, extractRHPVariantFromResponse} from '@userActions/Report';
+import {completeOnboarding} from '@userActions/Report';
 import {setOnboardingAdminsChatReportID, setOnboardingPolicyID} from '@userActions/Welcome';
 
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
-import type {OnboardingPurpose, OnboardingRHPVariant, Policy} from '@src/types/onyx';
+import type {OnboardingPurpose, Policy} from '@src/types/onyx';
 
 import type {OnyxCollection} from 'react-native-onyx';
 
@@ -102,18 +99,16 @@ function useAutoCreateTrackWorkspace() {
                   })
                 : {adminsChatReportID: onboardingAdminsChatReportID, policyID: onboardingPolicyID};
 
-            // On mobile, hardcode trackExpensesWithConcierge since the web flow already works
-            // with the CompleteGuidedSetup response and side panel isn't supported on native.
-            let rhpVariant: OnboardingRHPVariant | undefined = isSidePanelReportSupported ? undefined : CONST.ONBOARDING_RHP_VARIANT.TRACK_EXPENSES_WITH_CONCIERGE;
+            // Track users land on Home with the side panel closed (Home's Getting started section onboards them), so the
+            // CompleteGuidedSetup response no longer needs to be awaited for its RHP variant.
             try {
-                const response = await completeOnboarding({
+                await completeOnboarding({
                     engagementChoice,
                     onboardingMessage: onboardingMessages[engagementChoice],
                     firstName,
                     lastName,
                     adminsChatReportID: newAdminsChatReportID,
                     onboardingPolicyID: newPolicyID,
-                    shouldWaitForRHPVariantInitialization: isSidePanelReportSupported,
                     personalTrackGoal: onboardingPurposeSelected === CONST.ONBOARDING_CHOICES.TRACK_PERSONAL && !!personalTrackGoal ? personalTrackGoal : undefined,
                     introSelected,
                     isSelfTourViewed,
@@ -122,16 +117,6 @@ function useAutoCreateTrackWorkspace() {
                     currentUserAccountID,
                     delegateAccountID,
                 });
-
-                if (isSidePanelReportSupported) {
-                    rhpVariant = extractRHPVariantFromResponse(response);
-                    // Every Track onboarding choice should land in the Concierge RHP, but the backend
-                    // doesn't reliably return trackExpensesWithConcierge for all of them, so fall back to it
-                    // whenever the response omits a variant.
-                    if (!rhpVariant && isTrackOnboardingChoice(onboardingPurposeSelected)) {
-                        rhpVariant = CONST.ONBOARDING_RHP_VARIANT.TRACK_EXPENSES_WITH_CONCIERGE;
-                    }
-                }
             } catch (error) {
                 Log.warn('[useAutoCreateTrackWorkspace] Error completing onboarding', {error});
             } finally {
@@ -146,7 +131,6 @@ function useAutoCreateTrackWorkspace() {
                     newPolicyID,
                     mergedAccountConciergeReportID,
                     false,
-                    {variantOverride: rhpVariant},
                 );
             }
         },
