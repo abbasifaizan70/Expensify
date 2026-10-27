@@ -3405,6 +3405,18 @@ function createDraftWorkspace({
     return params;
 }
 
+/**
+ * The Rules feature state the duplicate should have.
+ *
+ * It is deliberately a resolved boolean rather than the source policy's raw `areRulesEnabled`: an `undefined` value makes
+ * `arePolicyRulesEnabled` fall back to the copied category rules on Control policies, which is what renders Rules in the
+ * duplicate's workspace menu. The Rules row is only offered when the source has the feature on, so `parts.expenses`
+ * already carries the source's state.
+ */
+function getDuplicatedAreRulesEnabled(parts: DuplicatePolicyDataOptions['parts'] | undefined): boolean {
+    return !!parts?.expenses;
+}
+
 function buildOptimisticDuplicatePolicy(
     sourcePolicy: Policy,
     policyOptions: DuplicatePolicyDataOptions & {distanceCustomUnitID: string; perDiemCustomUnitID: string; customUnitRateID: string},
@@ -3428,7 +3440,6 @@ function buildOptimisticDuplicatePolicy(
     const isInvoicesFeatureSelected = duplicatedParts?.invoices;
     const isInvoiceFieldsFeatureSelected = duplicatedParts?.invoiceFields;
     const isDistanceRatesFeatureSelected = duplicatedParts?.distance;
-    const isRulesFeatureSelected = duplicatedParts?.expenses;
     const isWorkflowsFeatureSelected = duplicatedParts?.exportLayouts;
     const isPerDiemFeatureSelected = duplicatedParts?.perDiem;
     const isOverviewFeatureSelected = duplicatedParts?.overview;
@@ -3472,7 +3483,7 @@ function buildOptimisticDuplicatePolicy(
         areTagsEnabled: isTagsFeatureSelected,
         areDistanceRatesEnabled: isDistanceRatesFeatureSelected,
         areInvoicesEnabled: isInvoicesFeatureSelected,
-        areRulesEnabled: isRulesFeatureSelected,
+        areRulesEnabled: getDuplicatedAreRulesEnabled(duplicatedParts),
         areWorkflowsEnabled: isWorkflowsFeatureSelected,
         areReportFieldsEnabled: isReportsFeatureSelected ? sourcePolicy?.areReportFieldsEnabled : false,
         areInvoiceFieldsEnabled: isInvoiceFieldsFeatureSelected ? sourcePolicy?.areInvoiceFieldsEnabled : false,
@@ -3663,6 +3674,10 @@ function buildDuplicatePolicyData(policy: Policy, options: DuplicatePolicyDataOp
             key: `${ONYXKEYS.COLLECTION.POLICY}${targetPolicyID}`,
             value: {
                 pendingAction: null,
+                // `applyHTTPSOnyxUpdates` applies `response.onyxData` before `successData`, so re-stating the value the
+                // user asked for here keeps a stray `areRulesEnabled` from the DuplicatePolicy response out of the
+                // workspace menu. It matches the optimistic value, so nothing changes when the response is already correct.
+                areRulesEnabled: getDuplicatedAreRulesEnabled(parts),
                 pendingFields: {
                     autoReporting: null,
                     approvalMode: null,

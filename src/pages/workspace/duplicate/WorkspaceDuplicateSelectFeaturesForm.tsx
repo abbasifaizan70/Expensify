@@ -19,7 +19,14 @@ import useThemeStyles from '@hooks/useThemeStyles';
 
 import {getExpenseDefaultRuleCount} from '@libs/ExpenseDefaultRuleUtils';
 import {readFileAsync} from '@libs/fileDownload/FileUtils';
-import {createFilteredMemberCountSelector, createInvoiceConfigurationTextSelector, getDistanceRateCustomUnit, getPerDiemCustomUnit, isCollectPolicy} from '@libs/PolicyUtils';
+import {
+    arePolicyRulesEnabled,
+    createFilteredMemberCountSelector,
+    createInvoiceConfigurationTextSelector,
+    getDistanceRateCustomUnit,
+    getPerDiemCustomUnit,
+    isCollectPolicy,
+} from '@libs/PolicyUtils';
 import {formatAddressToString} from '@libs/ReportActionsUtils';
 import {getReportFieldsByPolicyID} from '@libs/ReportUtils';
 
@@ -90,8 +97,11 @@ function WorkspaceDuplicateSelectFeaturesForm({policyID}: WorkspaceDuplicateForm
 
     const formattedAddress = !isEmptyObject(policy) && !isEmptyObject(policy.address) ? formatAddressToString(policy.address) : '';
 
+    // Merchant rules live on the Rules page, so they are only copyable while the source actually has Rules on.
+    const areRulesEnabled = arePolicyRulesEnabled(policy, policyCategories);
+
     const items = (() => {
-        const rules = getWorkspaceRules(policy, translate);
+        const rules = getWorkspaceRules(policy, translate, policyCategories);
         const workflows = getWorkflowRules(policy, translate);
 
         const result = [
@@ -158,7 +168,7 @@ function WorkspaceDuplicateSelectFeaturesForm({policyID}: WorkspaceDuplicateForm
                           : undefined,
                   }
                 : undefined,
-            codingRulesCount > 0 && !isCollect
+            areRulesEnabled && codingRulesCount > 0 && !isCollect
                 ? {
                       translation: translate('workspace.duplicateWorkspace.merchantRules'),
                       value: 'codingRules',

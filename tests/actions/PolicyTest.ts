@@ -15,6 +15,7 @@ import ONYXKEYS from '@src/ONYXKEYS';
 import type {
     GovernmentMileageRate,
     Onboarding,
+    PolicyCategories,
     PolicyJoinMember,
     PolicyReportField,
     Policy as PolicyType,
@@ -790,6 +791,59 @@ describe('actions/Policy', () => {
 
             await mockFetch?.resume?.();
             await waitForBatchedUpdates();
+        });
+
+        it('keeps Rules off on the duplicate when the DuplicatePolicy response turns it on', async () => {
+            // Given a Control source with Rules off whose categories still carry category rules, which is what the workspace menu
+            // falls back to when areRulesEnabled is missing, so the duplicate must never be left without an explicit value
+            await Onyx.set(ONYXKEYS.SESSION, {email: ESH_EMAIL, accountID: ESH_ACCOUNT_ID});
+            const fakePolicy: PolicyType = {...createRandomPolicy(21, CONST.POLICY.TYPE.CORPORATE), areRulesEnabled: false};
+            const policyCategories: PolicyCategories = {Travel: {name: 'Travel', enabled: true, maxExpenseAmount: 5000}};
+            await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${fakePolicy.id}`, fakePolicy);
+            await waitForBatchedUpdates();
+
+            const policyID = Policy.generatePolicyID();
+
+            // Given the server answers the way it does today: the duplicated policy, then a trailing merge that turns Rules on
+            mockFetch.mockAPICommand(WRITE_COMMANDS.DUPLICATE_POLICY, () => ({
+                onyxData: [
+                    {
+                        onyxMethod: Onyx.METHOD.MERGE,
+                        key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                        value: {areRulesEnabled: false},
+                    },
+                    {
+                        onyxMethod: Onyx.METHOD.MERGE,
+                        key: `${ONYXKEYS.COLLECTION.POLICY}${policyID}`,
+                        value: {areRulesEnabled: true},
+                    },
+                ],
+            }));
+            mockFetch?.pause?.();
+
+            // When the workspace is duplicated with the categories copied but Rules left out
+            Policy.duplicateWorkspace(fakePolicy, {
+                currentUserAccountID: ESH_ACCOUNT_ID,
+                currentUserEmail: ESH_EMAIL,
+                policyName: 'Rules Off Duplicate',
+                policyID: fakePolicy.id,
+                targetPolicyID: policyID,
+                welcomeNote: 'Join my policy',
+                personalDetailsByLogins: {},
+                parts: {categories: true, expenses: false, codingRules: false},
+                policyCategories,
+                localCurrency: 'USD',
+            });
+            await waitForBatchedUpdates();
+
+            // Then the optimistic policy already says Rules is off, so the menu has nothing to guess at
+            expect((await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`))?.areRulesEnabled).toBe(false);
+
+            await mockFetch?.resume?.();
+            await waitForBatchedUpdates();
+
+            // Then it is still off once the response lands, because successData is applied after the response's onyxData
+            expect((await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`))?.areRulesEnabled).toBe(false);
         });
 
         it('duplicate workspace with 3+ members creates optimistic announce chat using currentUserAccountID', async () => {

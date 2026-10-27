@@ -50,6 +50,7 @@ type CopyPolicySettingsSourceFeatureContext = {
     connectedIntegrationCount: number;
     hasWorkflowRules: boolean;
     hasWorkspaceRules: boolean;
+    areRulesEnabled: boolean;
     codingRulesCount: number;
     hasInvoiceConfiguration: boolean;
     isCollectPolicy: boolean;
@@ -296,7 +297,9 @@ function isCopyPolicySettingsPartEnabledOnSource(part: Part, context: CopyPolicy
         case 'rules':
             return context.hasWorkspaceRules && !context.isCollectPolicy;
         case 'codingRules':
-            return context.codingRulesCount > 0 && !context.isCollectPolicy;
+            // Merchant rules are managed from the Rules page, and copying them turns Rules on for the target,
+            // so they can only be offered while the source has the Rules feature enabled.
+            return context.codingRulesCount > 0 && !context.isCollectPolicy && context.areRulesEnabled;
         case 'distanceRates':
             return context.distanceRatesCount > 0 && !!policy?.areDistanceRatesEnabled;
         case 'perDiem':

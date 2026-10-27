@@ -36,6 +36,7 @@ import Navigation from '@libs/Navigation/Navigation';
 import type {PlatformStackRouteProp} from '@libs/Navigation/PlatformStackNavigation/types';
 import type {PolicyCopySettingsNavigatorParamList} from '@libs/Navigation/types';
 import {
+    arePolicyRulesEnabled,
     createFilteredMemberCountSelector,
     createInvoiceConfigurationTextSelector,
     getDistanceRateCustomUnit,
@@ -147,6 +148,7 @@ function CopyPolicySettingsSelectFeaturesPage() {
         connectedIntegrationCount: connectedIntegration?.length ?? 0,
         hasWorkflowRules: !!workflows?.length,
         hasWorkspaceRules: !!rules?.length,
+        areRulesEnabled: arePolicyRulesEnabled(sourcePolicy, policyCategories),
         codingRulesCount,
         hasInvoiceConfiguration: !!sourcePolicy?.areInvoicesEnabled && (!!invoiceConfigurationText || invoiceFieldsCount > 0 || isInvoiceFieldsEnabled(sourcePolicy)),
         isCollectPolicy: isCollectPolicy(sourcePolicy),

@@ -197,6 +197,7 @@ describe('CopyPolicySettingsUtils', () => {
             connectedIntegrationCount: 1,
             hasWorkflowRules: true,
             hasWorkspaceRules: true,
+            areRulesEnabled: true,
             codingRulesCount: 1,
             hasInvoiceConfiguration: true,
             isCollectPolicy: false,
@@ -227,9 +228,11 @@ describe('CopyPolicySettingsUtils', () => {
             expect(isCopyPolicySettingsPartEnabledOnSource('perDiem', baseContext)).toBe(true);
         });
 
-        it('shows merchant rules only when coding rules exist and not collect', () => {
+        it('shows merchant rules only when coding rules exist, the source has Rules on and it is not collect', () => {
             expect(isCopyPolicySettingsPartEnabledOnSource('codingRules', {...baseContext, codingRulesCount: 0})).toBe(false);
             expect(isCopyPolicySettingsPartEnabledOnSource('codingRules', {...baseContext, isCollectPolicy: true})).toBe(false);
+            // Copying merchant rules turns Rules on for the target, so a source with Rules off must not offer them
+            expect(isCopyPolicySettingsPartEnabledOnSource('codingRules', {...baseContext, areRulesEnabled: false})).toBe(false);
             expect(isCopyPolicySettingsPartEnabledOnSource('codingRules', baseContext)).toBe(true);
         });
 

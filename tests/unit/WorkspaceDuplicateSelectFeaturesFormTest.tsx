@@ -11,7 +11,7 @@ import {duplicateWorkspace} from '@userActions/Policy/Policy';
 
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
-import type {Policy} from '@src/types/onyx';
+import type {Policy, PolicyCategories} from '@src/types/onyx';
 import type Rule from '@src/types/onyx/Rule';
 
 import React from 'react';
@@ -81,10 +81,17 @@ const MERCHANT_RULE: Rule = {
     actions: toIndexMap([{name: CONST.RULES.ACTIONS.SET, field: CONST.RULES.EXPENSE_DEFAULT.FIELD.CATEGORY, value: 'Travel'}]),
 };
 
+/** Stands for an `areRulesEnabled` that was never written, as on a Control workspace migrated from Classic. */
+const UNSET = 'unset';
+
+/** A category whose rules are the only thing a migrated Control workspace has to infer the Rules feature from. */
+const CATEGORY_WITH_RULES: PolicyCategories = {Travel: {name: 'Travel', enabled: true, maxExpenseAmount: 5000}};
+
 /** A Control workspace whose only possible workspace-level rule is eReceipts, so the test decides whether the Rules row is shown. */
-function createSourcePolicy(hasWorkspaceRules: boolean): Policy {
+function createSourcePolicy(hasWorkspaceRules: boolean, areRulesEnabled: boolean | typeof UNSET): Policy {
     return {
         ...createRandomPolicy(Number(POLICY_ID), CONST.POLICY.TYPE.CORPORATE),
+        areRulesEnabled: areRulesEnabled === UNSET ? undefined : areRulesEnabled,
         preventSelfApproval: false,
         maxExpenseAmountNoReceipt: CONST.DISABLED_MAX_EXPENSE_VALUE,
         maxExpenseAmount: CONST.DISABLED_MAX_EXPENSE_VALUE,
@@ -93,8 +100,9 @@ function createSourcePolicy(hasWorkspaceRules: boolean): Policy {
     };
 }
 
-async function renderForm(hasWorkspaceRules: boolean) {
-    await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${POLICY_ID}`, createSourcePolicy(hasWorkspaceRules));
+async function renderForm(hasWorkspaceRules: boolean, areRulesEnabled: boolean | typeof UNSET = true, policyCategories?: PolicyCategories) {
+    await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${POLICY_ID}`, createSourcePolicy(hasWorkspaceRules, areRulesEnabled));
+    await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY_CATEGORIES}${POLICY_ID}`, policyCategories ?? null);
     await Onyx.set(`${ONYXKEYS.COLLECTION.RULE}merchantRule`, MERCHANT_RULE);
     await Onyx.set(ONYXKEYS.RAM_ONLY_HAS_RULES_DATA_BEEN_FETCHED, true);
     await Onyx.set(ONYXKEYS.DUPLICATE_WORKSPACE, {name: 'Duplicate', policyID: TARGET_POLICY_ID});
@@ -205,5 +213,44 @@ describe('WorkspaceDuplicateSelectFeaturesForm Rules and Merchant rules', () => 
 
         // Then the merchant rules are still copied, because there is no Rules row they could depend on
         expect(getSentParts()).toMatchObject({expenses: false, codingRules: true});
+    });
+
+    it('offers neither Rules nor Merchant rules when the Rules feature is off on the source', async () => {
+        // Given a Control source with the Rules feature off that still holds a rule value and a merchant rule, as every
+        // workspace does once Rules has been turned off: the values are kept, only the feature is disabled
+        await renderForm(true, false);
+
+        // When the admin continues
+        pressContinue();
+
+        // Then neither row is offered and neither part is copied, so the duplicate can't come out with Rules the source doesn't use
+        expect(getRow('rules')).toBeUndefined();
+        expect(getRow('codingRules')).toBeUndefined();
+        expect(getSentParts()).toMatchObject({expenses: false, codingRules: false});
+    });
+
+    it('still offers Rules on a migrated Control source whose flag is unset but has category rules', async () => {
+        // Given a Control workspace migrated from Classic, where areRulesEnabled is unset and the category rules are the
+        // only sign the feature is in use - the same signal the workspace menu uses to show the Rules page
+        await renderForm(true, UNSET, CATEGORY_WITH_RULES);
+
+        // When the admin continues
+        pressContinue();
+
+        // Then Rules is still offered and copied, because the source does have Rules
+        expect(getRow('rules')).toBeDefined();
+        expect(getSentParts()).toMatchObject({expenses: true});
+    });
+
+    it('offers no Rules row on a Control source with the flag unset and no category rules', async () => {
+        // Given a migrated Control workspace with no category rules at all, so nothing indicates the feature is in use
+        await renderForm(true, UNSET);
+
+        // When the admin continues
+        pressContinue();
+
+        // Then the Rules row is not offered, matching the source's own workspace menu
+        expect(getRow('rules')).toBeUndefined();
+        expect(getSentParts()).toMatchObject({expenses: false});
     });
 });
