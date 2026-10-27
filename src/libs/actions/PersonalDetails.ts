@@ -20,6 +20,7 @@ import type {LetterAvatarSchemeKey} from '@libs/Avatars/letterAvatarPalette';
 import type {CustomRNImageManipulatorResult} from '@libs/cropOrRotateImage/types';
 import DateUtils from '@libs/DateUtils';
 import * as ErrorUtils from '@libs/ErrorUtils';
+import evictCachedAvatar from '@libs/evictCachedAvatar';
 import * as LoginUtils from '@libs/LoginUtils';
 import Navigation from '@libs/Navigation/Navigation';
 import {isSupportAuthToken} from '@libs/Network/NetworkStore';
@@ -416,6 +417,9 @@ function updateAvatar(
 
     const parameters: UpdateUserAvatarParams = isDefaultAvatarResult(file) ? {customExpensifyAvatarID: file.customExpensifyAvatarID} : {file};
 
+    // The server stores the next photo at the account's existing avatar URL, so whatever the image cache holds under it is stale from here on.
+    evictCachedAvatar(currentUserPersonalDetails.avatar);
+
     API.write(WRITE_COMMANDS.UPDATE_USER_AVATAR, parameters, {
         optimisticData,
         successData,
@@ -483,6 +487,11 @@ function updateAvatarStyle(
 
     const parameters: UpdateUserAvatarParams = {color};
 
+    if (willClearAvatar) {
+        // The photo being cleared keeps its URL on the server for the next upload, so its cached copies must not outlive it.
+        evictCachedAvatar(currentUserPersonalDetails.avatar);
+    }
+
     API.write(WRITE_COMMANDS.UPDATE_USER_AVATAR, parameters, {
         optimisticData,
         successData,
@@ -522,6 +531,9 @@ function deleteAvatar(currentUserPersonalDetails: Pick<CurrentUserPersonalDetail
             },
         }),
     ];
+
+    // The removed photo keeps its URL on the server for the next upload, so its cached copies must not outlive it.
+    evictCachedAvatar(currentUserPersonalDetails.avatar);
 
     API.write(WRITE_COMMANDS.DELETE_USER_AVATAR, null, {
         optimisticData,

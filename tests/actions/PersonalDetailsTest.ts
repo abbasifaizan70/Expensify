@@ -1,6 +1,7 @@
 import * as API from '@libs/API';
 import {WRITE_COMMANDS} from '@libs/API/types';
 import type {CustomRNImageManipulatorResult} from '@libs/cropOrRotateImage/types';
+import evictCachedAvatar from '@libs/evictCachedAvatar';
 import Navigation from '@libs/Navigation/Navigation';
 import * as PersonalDetailsUtils from '@libs/PersonalDetailsUtils';
 import * as UserAvatarUtils from '@libs/UserAvatarUtils';
@@ -32,6 +33,13 @@ const mockPersonalDetailsUtils = jest.mocked(PersonalDetailsUtils);
 
 jest.mock('@libs/UserAvatarUtils');
 const mockUserAvatarUtils = jest.mocked(UserAvatarUtils);
+
+// The real module touches the native image cache; here only the call matters
+jest.mock('@libs/evictCachedAvatar', () => ({
+    __esModule: true,
+    default: jest.fn(() => Promise.resolve()),
+}));
+const mockEvictCachedAvatar = jest.mocked(evictCachedAvatar);
 
 describe('actions/PersonalDetails', () => {
     beforeAll(() => {
@@ -873,6 +881,93 @@ describe('actions/PersonalDetails', () => {
 
             expect(mockAPI.write).not.toHaveBeenCalled();
         });
+
+        it('should drop the cached copies of the current avatar before uploading a photo, since the server reuses its URL', async () => {
+            const mockFile = createMock<File>({
+                uri: 'file://test-avatar.jpg',
+                name: 'test-avatar.jpg',
+            });
+            const currentUserPersonalDetail: Pick<CurrentUserPersonalDetails, 'avatarThumbnail' | 'avatar' | 'accountID'> = {
+                avatar: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                avatarThumbnail: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                accountID: 123,
+            };
+
+            PersonalDetailsActions.updateAvatar(mockFile, currentUserPersonalDetail);
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).toHaveBeenCalledTimes(1);
+            expect(mockEvictCachedAvatar).toHaveBeenCalledWith('https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg');
+            expect(mockEvictCachedAvatar.mock.invocationCallOrder.at(0)).toBeLessThan(mockAPI.write.mock.invocationCallOrder.at(0) ?? 0);
+        });
+
+        it('should drop the cached copies of the current avatar when a preset avatar replaces it', async () => {
+            const mockFile = {
+                uri: 'file://test-avatar.jpg',
+                name: 'test-avatar.jpg',
+                customExpensifyAvatarID: 'default-avatar_7',
+            };
+            const currentUserPersonalDetail: Pick<CurrentUserPersonalDetails, 'avatarThumbnail' | 'avatar' | 'accountID'> = {
+                avatar: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                avatarThumbnail: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                accountID: 123,
+            };
+
+            PersonalDetailsActions.updateAvatar(mockFile, currentUserPersonalDetail);
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).toHaveBeenCalledWith('https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg');
+        });
+
+        it('should not touch the image cache when currentUserAccountID is not set', async () => {
+            const mockFile = createMock<File>({
+                uri: 'file://test-avatar.jpg',
+                name: 'test-avatar.jpg',
+            });
+
+            PersonalDetailsActions.updateAvatar(mockFile, {
+                avatar: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                avatarThumbnail: undefined,
+                accountID: CONST.DEFAULT_NUMBER_ID,
+            });
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('updateAvatarStyle', () => {
+        const currentUserPersonalDetail: Pick<CurrentUserPersonalDetails, 'avatarStyle' | 'avatar' | 'fallbackIcon' | 'accountID' | 'email' | 'firstName' | 'lastName'> = {
+            avatar: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+            avatarStyle: {color: 'blue400'},
+            fallbackIcon: 'file://test-avatar.jpg',
+            accountID: 123,
+            email: 'test@test.te',
+            firstName: 'Jane',
+            lastName: 'Smith',
+        };
+
+        it('should drop the cached copies of the uploaded photo that picking a letter color clears', async () => {
+            mockUserAvatarUtils.isGeneratedLetterAvatarURL.mockReturnValue(false);
+            mockUserAvatarUtils.getDefaultAvatarURL.mockReturnValue('https://d2k5nsl2zxldvw.cloudfront.net/images/avatars/generated/letter/J-S-7.png');
+
+            PersonalDetailsActions.updateAvatarStyle('green400', currentUserPersonalDetail);
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).toHaveBeenCalledTimes(1);
+            expect(mockEvictCachedAvatar).toHaveBeenCalledWith('https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg');
+            expect(mockAPI.write).toHaveBeenCalledWith(WRITE_COMMANDS.UPDATE_USER_AVATAR, {color: 'green400'}, expect.anything());
+        });
+
+        it('should leave the image cache alone when only the letter color changes', async () => {
+            mockUserAvatarUtils.isGeneratedLetterAvatarURL.mockReturnValue(true);
+
+            PersonalDetailsActions.updateAvatarStyle('green400', {...currentUserPersonalDetail, avatar: 'https://d2k5nsl2zxldvw.cloudfront.net/images/avatars/generated/letter/J-S-7.png'});
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).not.toHaveBeenCalled();
+            expect(mockAPI.write).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('deleteAvatar', () => {
@@ -1012,6 +1107,33 @@ describe('actions/PersonalDetails', () => {
                     ],
                 }),
             );
+        });
+
+        it('should drop the cached copies of the removed photo, since the next upload comes back on its URL', async () => {
+            const currentUserPersonalDetail: Pick<CurrentUserPersonalDetails, 'fallbackIcon' | 'avatar' | 'accountID'> = {
+                avatar: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                fallbackIcon: 'file://test-avatar.jpg',
+                accountID: 123,
+            };
+            mockUserAvatarUtils.getDefaultAvatarURL.mockReturnValue('https://d2k5nsl2zxldvw.cloudfront.net/images/avatars/generated/letter/J-S-7.png');
+
+            PersonalDetailsActions.deleteAvatar(currentUserPersonalDetail);
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).toHaveBeenCalledTimes(1);
+            expect(mockEvictCachedAvatar).toHaveBeenCalledWith('https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg');
+            expect(mockEvictCachedAvatar.mock.invocationCallOrder.at(0)).toBeLessThan(mockAPI.write.mock.invocationCallOrder.at(0) ?? 0);
+        });
+
+        it('should not touch the image cache when currentUserAccountID is not set', async () => {
+            PersonalDetailsActions.deleteAvatar({
+                avatar: 'https://d1wpcgnaa73g0y.cloudfront.net/5195303cce3daabe8d8898a4c573ee40b8bff88da2b309019fbb01082245c18a.jpeg',
+                fallbackIcon: undefined,
+                accountID: CONST.DEFAULT_NUMBER_ID,
+            });
+            await waitForBatchedUpdates();
+
+            expect(mockEvictCachedAvatar).not.toHaveBeenCalled();
         });
     });
 });
