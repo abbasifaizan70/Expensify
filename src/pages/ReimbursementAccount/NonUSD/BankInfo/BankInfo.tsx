@@ -23,7 +23,7 @@ import ONYXKEYS from '@src/ONYXKEYS';
 import ROUTES from '@src/ROUTES';
 import type {ReimbursementAccountForm} from '@src/types/form/ReimbursementAccountForm';
 
-import React, {useEffect, useRef} from 'react';
+import React, {useCallback, useEffect, useRef} from 'react';
 
 import type BankInfoSubStepProps from './types';
 
@@ -60,26 +60,11 @@ function BankInfo({onBackButtonPress, onSubmit, policyID, stepNames, backTo}: No
         createCorpayBankAccount({...values, ...corpayData} as ReimbursementAccountForm, policyID);
     };
 
-    useNetwork({
-        onReconnect: () => {
-            getCorpayBankAccountFields(country, currency);
-        },
-    });
-
-    useEffect(() => {
-        if (reimbursementAccount?.isLoading === true || !!reimbursementAccount?.errors) {
-            return;
-        }
-
-        // We need to check value of local isSubmittingRef because on initial render reimbursementAccount?.isSuccess is still true after submitting the previous step
-        if (reimbursementAccount?.isSuccess === true && isSubmittingRef.current) {
-            isSubmittingRef.current = false;
-            onSubmit();
-            clearReimbursementAccountBankCreation();
-        }
-    }, [corpayFields?.bankCurrency, country, currency, onSubmit, reimbursementAccount?.errors, reimbursementAccount?.isLoading, reimbursementAccount?.isSuccess]);
-
-    useEffect(() => {
+    // Only fetch the Corpay field definition when what we have in Onyx doesn't already match this step's country and
+    // currency. Fetching unconditionally (as the reconnect handler used to) can fail, and a failed fetch leaves
+    // CORPAY_FIELDS with isSuccess: false, which swaps the whole step out for a NotFoundPage even though the fields
+    // the user is looking at are perfectly fine.
+    const fetchCorpayFieldsIfNeeded = useCallback(() => {
         // No fetching when there is no country
         if (country === '') {
             return;
@@ -97,7 +82,28 @@ function BankInfo({onBackButtonPress, onSubmit, policyID, stepNames, backTo}: No
         }
 
         getCorpayBankAccountFields(country, currency);
-    }, [corpayFields?.bankCurrency, corpayFields?.bankCountry, country, currency]);
+    }, [corpayFields?.bankCountry, corpayFields?.bankCurrency, country, currency]);
+
+    useNetwork({
+        onReconnect: fetchCorpayFieldsIfNeeded,
+    });
+
+    useEffect(() => {
+        if (reimbursementAccount?.isLoading === true || !!reimbursementAccount?.errors) {
+            return;
+        }
+
+        // We need to check value of local isSubmittingRef because on initial render reimbursementAccount?.isSuccess is still true after submitting the previous step
+        if (reimbursementAccount?.isSuccess === true && isSubmittingRef.current) {
+            isSubmittingRef.current = false;
+            onSubmit();
+            clearReimbursementAccountBankCreation();
+        }
+    }, [corpayFields?.bankCurrency, country, currency, onSubmit, reimbursementAccount?.errors, reimbursementAccount?.isLoading, reimbursementAccount?.isSuccess]);
+
+    useEffect(() => {
+        fetchCorpayFieldsIfNeeded();
+    }, [fetchCorpayFieldsIfNeeded]);
 
     const buildRoute = (pageName: string, action?: 'edit') => ROUTES.BANK_ACCOUNT_NON_USD_SETUP.getRoute({policyID, page: PAGE_NAME.BANK_INFO, subPage: pageName, action, backTo});
 
@@ -122,7 +128,12 @@ function BankInfo({onBackButtonPress, onSubmit, policyID, stepNames, backTo}: No
         }
     };
 
-    if (corpayFields !== undefined && corpayFields?.isLoading === false && corpayFields?.isSuccess !== undefined && corpayFields?.isSuccess === false) {
+    // A failed fetch only means "not found" when we have nothing usable to show. If the fields we already hold match this
+    // step's country and currency, keep the step up instead of dropping the user out of an in-progress setup.
+    const hasUsableCorpayFields =
+        !!corpayFields?.formFields?.length && corpayFields.bankCurrency === currency && (currency !== CONST.CURRENCY.EUR || corpayFields.bankCountry === country);
+
+    if (!hasUsableCorpayFields && corpayFields !== undefined && corpayFields?.isLoading === false && corpayFields?.isSuccess !== undefined && corpayFields?.isSuccess === false) {
         return <NotFoundPage />;
     }
 
