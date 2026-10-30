@@ -5493,6 +5493,130 @@ describe('actions/IOU/ReportWorkflow', () => {
             expect(newExpenseReport?.stateNum).toBe(CONST.REPORT.STATE_NUM.SUBMITTED);
             expect(newExpenseReport?.statusNum).toBe(CONST.REPORT.STATUS_NUM.SUBMITTED);
         });
+
+        it('splits the held expense out and lowers the approved totals when the workspace chat is not in Onyx', async () => {
+            // Given a submitted expense report with one unheld and one held expense, approved by someone who isn't a member
+            // of the submitter's workspace chat (e.g. a vacation delegate), so that chat is not in Onyx
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`, null);
+            await Onyx.set(ONYXKEYS.SESSION, {
+                email: adminEmail,
+                accountID: adminAccountID,
+            });
+
+            const unheldTransaction = buildOptimisticTransaction({
+                transactionParams: {
+                    amount: -10000,
+                    currency: CONST.CURRENCY.USD,
+                    reportID: expenseReport.reportID,
+                },
+            });
+            const heldTransaction = buildOptimisticTransaction({
+                transactionParams: {
+                    amount: -6000,
+                    currency: CONST.CURRENCY.USD,
+                    reportID: expenseReport.reportID,
+                },
+            });
+            const reportActions: ReportActions = {};
+            for (const transaction of [unheldTransaction, heldTransaction]) {
+                const iouAction = buildOptimisticIOUReportAction({
+                    type: CONST.IOU.REPORT_ACTION_TYPE.CREATE,
+                    amount: transaction.amount,
+                    currency: transaction.currency,
+                    comment: '',
+                    participants: [],
+                    transactionID: transaction.transactionID,
+                    getCurrencyDecimals: getCurrencyDecimalsLocal,
+                });
+                reportActions[iouAction.reportActionID] = iouAction;
+            }
+            const expenseReportWithTotals: Report = {
+                ...expenseReport,
+                total: -16000,
+                unheldTotal: -16000,
+                reimbursableTotal: -16000,
+                unheldReimbursableTotal: -16000,
+                nonReimbursableTotal: 0,
+                unheldNonReimbursableTotal: 0,
+            };
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`, expenseReportWithTotals);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${unheldTransaction.transactionID}`, unheldTransaction);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`, heldTransaction);
+            await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${expenseReport.reportID}`, reportActions);
+            await waitForBatchedUpdates();
+
+            putOnHold({
+                transactionID: heldTransaction.transactionID,
+                transaction: heldTransaction,
+                comment: 'hold reason',
+                initialReportID: expenseReport.reportID,
+                initialReport: expenseReportWithTotals,
+                transactionReport: expenseReportWithTotals,
+                isOffline: false,
+                currentUserLogin: adminEmail,
+                currentUserAccountID: adminAccountID,
+                transactionViolations: undefined,
+                isTrackIntentUser: false,
+                delegateAccountID: undefined,
+                rules: undefined,
+                ancestors: [],
+            });
+            await waitForBatchedUpdates();
+
+            // When only the unheld expenses are approved (callers pass the live report, refreshed by the hold)
+            mockFetch?.pause?.();
+            const apiWriteSpy = jest.spyOn(API, 'write');
+            const heldExpenseReport = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`);
+            const optimisticHoldReportID = approveMoneyRequest({
+                personalDetailsByLogins: {},
+                rules: undefined,
+                getCurrencyDecimals: getCurrencyDecimalsLocal,
+                expenseReport: heldExpenseReport,
+                expenseReportPolicy: policy,
+                currentUserAccountIDParam: adminAccountID,
+                currentUserEmailParam: adminEmail,
+                hasViolations: false,
+                isASAPSubmitBetaEnabled: false,
+                userBillingGracePeriodEnds: undefined,
+                amountOwed: 0,
+                full: false,
+                ownerBillingGracePeriodEnd: undefined,
+                delegateEmail: undefined,
+                delegateAccountID: undefined,
+                isTrackIntentUser: false,
+                ownerLogin: undefined,
+            });
+            await waitForBatchedUpdates();
+
+            // Then the held expense is moved onto a new report that belongs to the submitter's workspace chat
+            expect(optimisticHoldReportID).toBeTruthy();
+            const heldTransactionAfter = await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`);
+            expect(heldTransactionAfter?.reportID).toBe(optimisticHoldReportID);
+            const unheldTransactionAfter = await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${unheldTransaction.transactionID}`);
+            expect(unheldTransactionAfter?.reportID).toBe(expenseReport.reportID);
+
+            const holdReport = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${optimisticHoldReportID}`);
+            expect(holdReport?.type).toBe(CONST.REPORT.TYPE.EXPENSE);
+            expect(holdReport?.chatReportID).toBe(chatReport.reportID);
+            expect(holdReport?.policyID).toBe(policy.id);
+            expect(holdReport?.total).toBe(-6000);
+
+            // And the approved report only counts the unheld expense, so it no longer shows the full total
+            const approvedReport = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`);
+            expect(approvedReport?.total).toBe(-10000);
+            expect(approvedReport?.reimbursableTotal).toBe(-10000);
+
+            // And the new report's IDs are sent to the server so it reuses them
+            const [, parameters] = getRequiredWriteCall(apiWriteSpy.mock.calls);
+            expect(parameters.optimisticHoldReportID).toBe(optimisticHoldReportID);
+            expect(parameters.optimisticHoldActionID).toBe(holdReport?.parentReportActionID);
+
+            // And nothing is written into the chat that isn't in Onyx
+            expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`)).toBeUndefined();
+            expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`)).toBeUndefined();
+
+            mockFetch?.resume?.();
+        });
     });
 
     describe('getReportOriginalCreationTimestamp', () => {

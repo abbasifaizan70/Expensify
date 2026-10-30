@@ -435,7 +435,9 @@ function approveMoneyRequest(params: ApproveMoneyRequestFunctionParams) {
     let optimisticHoldReportExpenseActionIDs;
     let optimisticReportActionCopyIDs;
     let optimisticCreatedReportForUnapprovedTransactionsActionID;
-    if (!full && !!chatReport && !!expenseReport) {
+    // The workspace chat isn't in Onyx for an approver who isn't one of its members (e.g. a vacation delegate), so the
+    // held expenses still have to be split out without it. Otherwise the approved report keeps the full total locally.
+    if (!full) {
         const originalCreated = getReportOriginalCreationTimestamp(expenseReport);
         const holdReportOnyxData = getReportFromHoldRequestsOnyxData({
             chatReport,
