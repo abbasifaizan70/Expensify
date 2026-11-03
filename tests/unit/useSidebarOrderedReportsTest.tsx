@@ -602,5 +602,80 @@ describe('useSidebarOrderedReports', () => {
             // attributes did not change, so it is not rechecked
             expect(getUpdatedReportsKeys()).toEqual([`${ONYXKEYS.COLLECTION.REPORT}${newDMReportID}`]);
         });
+
+        it('should not recompute, re-sort or republish the LHN when REPORT_ATTRIBUTES is rewritten with equal content', async () => {
+            // Given a settled LHN whose derived attributes are known
+            const displayedReports = createMockReports({report1: {reportName: 'Chat A'}});
+            const attributes = {reports: {[displayedReportID]: createReportAttributes()}, locale: 'en'};
+            mockSidebarUtils.getReportsToDisplayInLHN.mockReturnValue({[`${ONYXKEYS.COLLECTION.REPORT}${displayedReportID}`]: displayedReports[displayedReportID]});
+            mockSidebarUtils.updateReportsToDisplayInLHN.mockImplementation(({displayedReports: reports}) => reports);
+            await act(async () => {
+                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${displayedReportID}`, displayedReports[displayedReportID]);
+                await Onyx.set(ONYXKEYS.DERIVED.REPORT_ATTRIBUTES, attributes);
+            });
+            let providerPublishes = 0;
+            let lastOrderedReportIDs: string[] | undefined;
+            renderHook(
+                () => {
+                    const {orderedReportIDs} = useSidebarOrderedReports();
+                    if (orderedReportIDs !== lastOrderedReportIDs) {
+                        lastOrderedReportIDs = orderedReportIDs;
+                        providerPublishes++;
+                    }
+                },
+                {wrapper: TestWrapper},
+            );
+            await waitForBatchedUpdatesWithAct();
+            mockSidebarUtils.updateReportsToDisplayInLHN.mockClear();
+            mockSidebarUtils.sortReportsToDisplayInLHN.mockClear();
+            providerPublishes = 0;
+
+            // When the derived value is rewritten the way OnyxDerived writes it (no cache check, so subscribers get a
+            // new object) with exactly the same content
+            await act(async () => {
+                await Onyx.set(ONYXKEYS.DERIVED.REPORT_ATTRIBUTES, {reports: {[displayedReportID]: createReportAttributes()}, locale: 'en'}, {skipCacheCheck: true});
+            });
+            await waitForBatchedUpdatesWithAct();
+
+            // Then nothing about the LHN could have changed, so the set is not rechecked, the list is not re-sorted and
+            // consumers are not handed a new orderedReportIDs
+            expect(mockSidebarUtils.updateReportsToDisplayInLHN).not.toHaveBeenCalled();
+            expect(mockSidebarUtils.sortReportsToDisplayInLHN).not.toHaveBeenCalled();
+            expect(providerPublishes).toBe(0);
+        });
+    });
+
+    it('should commit the LHN cache without scheduling a second render', async () => {
+        // Given a settled LHN with one displayed report, and a consumer that counts how many times the provider renders it
+        const displayedReports = createMockReports({report1: {reportName: 'Chat A'}});
+        const reportKey = `${ONYXKEYS.COLLECTION.REPORT}1`;
+        mockSidebarUtils.getReportsToDisplayInLHN.mockReturnValue({[reportKey]: displayedReports['1']});
+        // Every recheck returns a new map, as it does for an unread, GBR or RBR chat whose report changed
+        mockSidebarUtils.updateReportsToDisplayInLHN.mockImplementation(({displayedReports: reports}) => ({...reports}));
+        await act(async () => {
+            await Onyx.set(reportKey, displayedReports['1']);
+        });
+        let consumerRenders = 0;
+        renderHook(
+            () => {
+                useSidebarOrderedReports();
+                consumerRenders++;
+            },
+            {wrapper: TestWrapper},
+        );
+        await waitForBatchedUpdatesWithAct();
+        consumerRenders = 0;
+        mockSidebarUtils.updateReportsToDisplayInLHN.mockClear();
+
+        // When the displayed report changes once
+        await act(async () => {
+            await Onyx.merge(reportKey, {lastVisibleActionCreated: '2024-01-02 10:00:00'});
+        });
+        await waitForBatchedUpdatesWithAct();
+
+        // Then the LHN set is updated in the render caused by that write, and storing the result as the next
+        // incremental baseline does not cause a render of its own (which would recheck the whole set again)
+        expect(mockSidebarUtils.updateReportsToDisplayInLHN).toHaveBeenCalledTimes(1);
+        expect(consumerRenders).toBe(1);
     });
 });

@@ -126,7 +126,24 @@ function SidebarOrderedReportsContextProvider({
     const reportAttributes = useReportAttributes();
     const prevReportAttributes = usePrevious(reportAttributes);
     const reportAttributesUpdates = useMemo(() => getReportAttributesUpdates(reportAttributes, prevReportAttributes), [reportAttributes, prevReportAttributes]);
-    const [currentReportsToDisplay, setCurrentReportsToDisplay] = useState<ReportsToDisplayInLHN>({});
+    // REPORT_ATTRIBUTES is rewritten with a new object on every recompute, even when nothing changed (see
+    // getReportAttributesUpdates). Everything below only needs the attributes' content, so it reads a reference that
+    // advances only when that value diff reports a change — otherwise every no-op rewrite would recompute the LHN set,
+    // re-sort it and republish the context to every consumer.
+    const lhnReportAttributesRef = useRef(reportAttributes);
+    const lhnReportAttributes = useMemo(() => {
+        if (reportAttributesUpdates === undefined && reportAttributes !== undefined && lhnReportAttributesRef.current !== undefined) {
+            return lhnReportAttributesRef.current;
+        }
+        lhnReportAttributesRef.current = reportAttributes;
+        return reportAttributes;
+    }, [reportAttributes, reportAttributesUpdates]);
+    // The incremental cache the memo below starts from. It is a ref, not state: publishing the memo result into it must
+    // not schedule a render, because every provider commit here is a synchronous useOnyx commit whose passive effects
+    // React flushes inside the commit — a setState there leaves an update pending after each commit, which is what
+    // React's nested-update counter counts (React #185 once 50 commits in a row do it).
+    const currentReportsToDisplayRef = useRef<ReportsToDisplayInLHN>({});
+    const currentReportsToDisplay = currentReportsToDisplayRef.current;
     const {shouldUseNarrowLayout} = useResponsiveLayout();
     const {isOffline} = useNetwork();
     const {accountID, login: currentUserLogin} = useCurrentUserPersonalDetails();
@@ -257,7 +274,7 @@ function SidebarOrderedReportsContextProvider({
                 isDefaultRoomsBetaEnabled,
                 transactionViolations,
                 reportNameValuePairs,
-                reportAttributes,
+                reportAttributes: lhnReportAttributes,
                 draftComments: reportsDrafts,
                 transactions,
                 isOffline,
@@ -282,7 +299,7 @@ function SidebarOrderedReportsContextProvider({
                 currentUserLogin: currentUserLogin ?? '',
                 currentUserAccountID: accountID,
                 reportNameValuePairs,
-                reportAttributes,
+                reportAttributes: lhnReportAttributes,
                 conciergeReportID,
                 guideAccountIDs,
                 session,
@@ -290,7 +307,7 @@ function SidebarOrderedReportsContextProvider({
         }
 
         return reportsToDisplay;
-        // Rule disabled intentionally — triggering a re-render on currentReportsToDisplay would cause an infinite loop
+        // Rule disabled intentionally — currentReportsToDisplay is the previous result read from a ref, not an input
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         getUpdatedReports,
@@ -300,7 +317,7 @@ function SidebarOrderedReportsContextProvider({
         isDefaultRoomsBetaEnabled,
         transactionViolations,
         reportNameValuePairs,
-        reportAttributes,
+        lhnReportAttributes,
         reportsDrafts,
         isOffline,
         clearCacheDummyCounter,
@@ -334,15 +351,16 @@ function SidebarOrderedReportsContextProvider({
         return result;
     }, [reportsDrafts]);
 
+    // Commit the cache after render (not inside the memo) so an abandoned render never publishes a speculative map.
     useEffect(() => {
-        setCurrentReportsToDisplay(reportsToDisplayInLHN);
+        currentReportsToDisplayRef.current = reportsToDisplayInLHN;
     }, [reportsToDisplayInLHN]);
 
     const getOrderedReportIDs = useCallback(
-        () => SidebarUtils.sortReportsToDisplayInLHN(reportsToDisplayInLHN, priorityMode, localeCompare, hasDraftByReportID, reportNameValuePairs, reportAttributes),
+        () => SidebarUtils.sortReportsToDisplayInLHN(reportsToDisplayInLHN, priorityMode, localeCompare, hasDraftByReportID, reportNameValuePairs, lhnReportAttributes),
         // Rule disabled intentionally - reports should be sorted only when the reportsToDisplayInLHN changes
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [reportsToDisplayInLHN, localeCompare, hasDraftByReportID, reportAttributes],
+        [reportsToDisplayInLHN, localeCompare, hasDraftByReportID, lhnReportAttributes],
     );
 
     const orderedReportIDs = useMemo(() => getOrderedReportIDs(), [getOrderedReportIDs]);
@@ -389,7 +407,7 @@ function SidebarOrderedReportsContextProvider({
 
     const clearLHNCache = useCallback(() => {
         Log.info('[useSidebarOrderedReports] Clearing sidebar cache manually via debug modal');
-        setCurrentReportsToDisplay({});
+        currentReportsToDisplayRef.current = {};
         setClearCacheDummyCounter((current) => current + 1);
     }, []);
 
@@ -439,7 +457,7 @@ function SidebarOrderedReportsContextProvider({
                 filteredReportIDs: arraysEqual(updatedFilteredIDs, filteredReportIDs) ? filteredReportIDs : updatedFilteredIDs,
                 orderedReportIDs: updatedReportIDs,
                 currentReportID: derivedCurrentReportID,
-                chatTabBrickRoad: getChatTabBrickRoad(updatedReportIDs, reportAttributes),
+                chatTabBrickRoad: getChatTabBrickRoad(updatedReportIDs, lhnReportAttributes),
                 activeTab,
                 inboxTabCounts,
                 hasStaleUnreadReport,
@@ -450,7 +468,7 @@ function SidebarOrderedReportsContextProvider({
             filteredReportIDs,
             orderedReportIDs,
             currentReportID: derivedCurrentReportID,
-            chatTabBrickRoad: getChatTabBrickRoad(orderedReportIDs, reportAttributes),
+            chatTabBrickRoad: getChatTabBrickRoad(orderedReportIDs, lhnReportAttributes),
             activeTab,
             inboxTabCounts,
             hasStaleUnreadReport,
@@ -461,7 +479,7 @@ function SidebarOrderedReportsContextProvider({
         filteredReportIDs,
         derivedCurrentReportID,
         shouldUseNarrowLayout,
-        reportAttributes,
+        lhnReportAttributes,
         activeTab,
         inboxTabCounts,
         hasStaleUnreadReport,

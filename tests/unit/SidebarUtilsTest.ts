@@ -5004,6 +5004,115 @@ describe('SidebarUtils', () => {
                 expect(result).not.toBe(displayedReports);
                 expect(result['0']).toBeUndefined();
             });
+
+            describe('flagged entries', () => {
+                // A never-read DM: it is stored in the LHN set as a spread copy of the report with the three flags on it
+                const makeUnreadChat = (overrides: Partial<Report> = {}): Report => ({
+                    reportID: '1',
+                    reportName: 'Chat',
+                    type: CONST.REPORT.TYPE.CHAT,
+                    lastMessageText: 'hello',
+                    lastReadTime: undefined,
+                    lastActorAccountID: 18921695,
+                    lastVisibleActionCreated: '2025-01-20 12:30:03.784',
+                    participants: {
+                        [CURRENT_USER_ACCOUNT_ID]: {notificationPreference: 'always'},
+                        18921695: {notificationPreference: 'always'},
+                    },
+                    ...overrides,
+                });
+
+                const buildParams = (reports: OnyxCollection<Report>, requiresAttention = false) => ({
+                    currentReportId: undefined,
+                    policies: {},
+                    reports,
+                    isDefaultRoomsBetaEnabled: false,
+                    priorityMode: CONST.PRIORITY_MODE.DEFAULT,
+                    draftComments: {},
+                    transactionViolations: {},
+                    transactions: {},
+                    isOffline: false,
+                    currentUserLogin: CURRENT_USER_LOGIN,
+                    currentUserAccountID: CURRENT_USER_ACCOUNT_ID,
+                    reportNameValuePairs: {},
+                    reportAttributes: {
+                        '1': {reportName: 'Chat', isEmpty: false, brickRoadStatus: undefined, requiresAttention, reportErrors: {}},
+                    },
+                    guideAccountIDs: [],
+                    conciergeReportID: undefined,
+                    session: undefined,
+                });
+
+                const updateParams = (displayedReports: ReportsToDisplayInLHN, reports: OnyxCollection<Report>, requiresAttention = false) => {
+                    const {priorityMode, ...rest} = buildParams(reports, requiresAttention);
+                    return {
+                        ...rest,
+                        displayedReports,
+                        updatedReportsKeys: Object.keys(displayedReports),
+                        isInFocusMode: (priorityMode as string) === CONST.PRIORITY_MODE.GSD,
+                    };
+                };
+
+                // The chat is hidden unless the current user's participant preference says otherwise, and that lookup
+                // reads the signed-in account from the SESSION connection
+                const signIn = async () => {
+                    await Onyx.set(ONYXKEYS.SESSION, {accountID: CURRENT_USER_ACCOUNT_ID, email: CURRENT_USER_LOGIN});
+                    await waitForBatchedUpdatesWithAct();
+                };
+
+                it('should return the same map and entry when a flagged report is rechecked with unchanged input', async () => {
+                    // Given an LHN set holding one unread chat (a flagged entry, stored as a spread copy of the report)
+                    await signIn();
+                    const reportKey = `${ONYXKEYS.COLLECTION.REPORT}1`;
+                    const reports: OnyxCollection<Report> = {[reportKey]: makeUnreadChat()};
+                    const displayedReports = SidebarUtils.getReportsToDisplayInLHN(buildParams(reports));
+                    expect(displayedReports[reportKey]?.isUnreadReport).toBe(true);
+
+                    // When the set is rechecked twice with the same report reference and the same flags, feeding each
+                    // result back in (as the provider does with its cache)
+                    const second = SidebarUtils.updateReportsToDisplayInLHN(updateParams(displayedReports, reports));
+                    const third = SidebarUtils.updateReportsToDisplayInLHN(updateParams(second, reports));
+
+                    // Then nothing changed, so the lazy copy is never taken: the same map and the same entry come back
+                    expect(second).toBe(displayedReports);
+                    expect(third).toBe(displayedReports);
+                    expect(third[reportKey]).toBe(displayedReports[reportKey]);
+                });
+
+                it('should return a new entry when the flagged report itself changes', async () => {
+                    // Given an LHN set holding one unread chat
+                    await signIn();
+                    const reportKey = `${ONYXKEYS.COLLECTION.REPORT}1`;
+                    const reports: OnyxCollection<Report> = {[reportKey]: makeUnreadChat()};
+                    const displayedReports = SidebarUtils.getReportsToDisplayInLHN(buildParams(reports));
+
+                    // When the report gets a new message (a new report object from Onyx) and is rechecked
+                    const updatedReports: OnyxCollection<Report> = {[reportKey]: makeUnreadChat({lastVisibleActionCreated: '2025-01-20 12:31:00.000'})};
+                    const result = SidebarUtils.updateReportsToDisplayInLHN(updateParams(displayedReports, updatedReports));
+
+                    // Then the entry is rebuilt from the new report and the map is a new object
+                    expect(result).not.toBe(displayedReports);
+                    expect(result[reportKey]).not.toBe(displayedReports[reportKey]);
+                    expect(result[reportKey]?.lastVisibleActionCreated).toBe('2025-01-20 12:31:00.000');
+                    expect(result[reportKey]?.isUnreadReport).toBe(true);
+                });
+
+                it('should return a new entry when only a flag of the flagged report changes', async () => {
+                    // Given an LHN set holding one unread chat that does not require attention
+                    await signIn();
+                    const reportKey = `${ONYXKEYS.COLLECTION.REPORT}1`;
+                    const reports: OnyxCollection<Report> = {[reportKey]: makeUnreadChat()};
+                    const displayedReports = SidebarUtils.getReportsToDisplayInLHN(buildParams(reports));
+                    expect(displayedReports[reportKey]?.requiresAttention).toBe(false);
+
+                    // When its derived attributes flip requiresAttention, with the same report reference
+                    const result = SidebarUtils.updateReportsToDisplayInLHN(updateParams(displayedReports, reports, true));
+
+                    // Then the entry is rebuilt with the new flag
+                    expect(result).not.toBe(displayedReports);
+                    expect(result[reportKey]?.requiresAttention).toBe(true);
+                });
+            });
         });
 
         describe('getReportsToDisplayInLHN', () => {

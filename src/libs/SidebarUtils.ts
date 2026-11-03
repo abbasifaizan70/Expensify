@@ -259,6 +259,37 @@ function shouldDisplayReportInLHN({
 /** The LHN set produced by the most recent build, read on report open to detect unread chats the LHN did not surface. */
 let lastReportsToDisplayInLHN: ReportsToDisplayInLHN | undefined;
 
+type LHNEntryFlags = {
+    requiresAttention: boolean;
+    hasErrorsOtherThanFailedReceipt: boolean | undefined;
+    isUnreadReport: boolean;
+};
+
+/**
+ * A flagged LHN entry is a spread copy of its report, so it can never be reference-equal to the report it was built
+ * from. Remember the source report of each copy so an unchanged report (and unchanged flags) can reuse the entry
+ * instead of allocating a new one — which is what lets updateReportsToDisplayInLHN hand back the same map.
+ */
+const flaggedLHNEntrySources = new WeakMap<object, Report>();
+
+function toFlaggedLHNEntry(report: Report, flags: LHNEntryFlags): ReportsToDisplayInLHN[string] {
+    const entry = {...report, ...flags};
+    flaggedLHNEntrySources.set(entry, report);
+    return entry;
+}
+
+function isFlaggedLHNEntryUpToDate(existingEntry: ReportsToDisplayInLHN[string] | undefined, report: Report, flags: LHNEntryFlags): boolean {
+    if (!existingEntry) {
+        return false;
+    }
+    return (
+        flaggedLHNEntrySources.get(existingEntry) === report &&
+        existingEntry.requiresAttention === flags.requiresAttention &&
+        existingEntry.hasErrorsOtherThanFailedReceipt === flags.hasErrorsOtherThanFailedReceipt &&
+        existingEntry.isUnreadReport === flags.isUnreadReport
+    );
+}
+
 /** Used to detect when the focused report changes, so its LHN state is captured before the rebuild that opening triggers. */
 let lastBuildCurrentReportId: string | undefined;
 
@@ -363,7 +394,9 @@ function getReportsToDisplayInLHN({
             const requiresAttention = reportAttributes?.[report?.reportID]?.requiresAttention ?? false;
             const isUnreadReport = getIsUnreadReportForInboxTab(report, isReportArchived, reportAttributes?.[report?.reportID]?.isEmpty);
             reportsToDisplay[reportID] =
-                requiresAttention || hasErrorsOtherThanFailedReceipt || isUnreadReport ? {...report, requiresAttention, hasErrorsOtherThanFailedReceipt, isUnreadReport} : report;
+                requiresAttention || hasErrorsOtherThanFailedReceipt || isUnreadReport
+                    ? toFlaggedLHNEntry(report, {requiresAttention, hasErrorsOtherThanFailedReceipt, isUnreadReport})
+                    : report;
         }
     }
 
@@ -464,13 +497,9 @@ function updateReportsToDisplayInLHN({
             const existingEntry = displayedReports[reportID];
 
             if (hasFlags) {
-                if (
-                    existingEntry !== report ||
-                    existingEntry?.requiresAttention !== requiresAttention ||
-                    existingEntry?.hasErrorsOtherThanFailedReceipt !== hasErrorsOtherThanFailedReceipt ||
-                    existingEntry?.isUnreadReport !== isUnreadReport
-                ) {
-                    getMutableCopy()[reportID] = {...report, requiresAttention, hasErrorsOtherThanFailedReceipt, isUnreadReport};
+                const flags = {requiresAttention, hasErrorsOtherThanFailedReceipt, isUnreadReport};
+                if (!isFlaggedLHNEntryUpToDate(existingEntry, report, flags)) {
+                    getMutableCopy()[reportID] = toFlaggedLHNEntry(report, flags);
                 }
             } else if (existingEntry !== report) {
                 getMutableCopy()[reportID] = report;
