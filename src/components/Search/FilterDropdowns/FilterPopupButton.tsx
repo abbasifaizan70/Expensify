@@ -1,11 +1,10 @@
 import PopoverWithMeasuredContent from '@components/PopoverWithMeasuredContent';
 import withViewportOffsetTop from '@components/withViewportOffsetTop';
 
-import useBottomSafeSafeAreaPaddingStyle from '@hooks/useBottomSafeSafeAreaPaddingStyle';
-import useKeyboardState from '@hooks/useKeyboardState';
 import useOnyx from '@hooks/useOnyx';
 import usePopoverPosition from '@hooks/usePopoverPosition';
 import useResponsiveLayout from '@hooks/useResponsiveLayout';
+import useSafeAreaPaddings from '@hooks/useSafeAreaPaddings';
 import useStyleUtils from '@hooks/useStyleUtils';
 import useThemeStyles from '@hooks/useThemeStyles';
 import useWindowDimensions from '@hooks/useWindowDimensions';
@@ -22,6 +21,8 @@ import {useIsFocused} from '@react-navigation/core';
 import {willAlertModalBecomeVisibleSelector} from '@selectors/Modal';
 import React, {useRef, useState} from 'react';
 import {View} from 'react-native';
+import {useReanimatedKeyboardAnimation} from 'react-native-keyboard-controller';
+import Animated, {useAnimatedStyle} from 'react-native-reanimated';
 
 type PopoverComponentProps = {
     isExpanded: boolean;
@@ -70,12 +71,18 @@ function FilterPopupButton({
     const {isSmallScreenWidth, isInLandscapeMode} = useResponsiveLayout();
     const isFocused = useIsFocused();
     const styles = useThemeStyles();
-    const {isKeyboardActive} = useKeyboardState();
-    // The style is applied inside the popover, which never renders an offline indicator, so don't reserve space for one
-    const bottomSafeAreaPaddingStyle = useBottomSafeSafeAreaPaddingStyle({
-        addBottomSafeAreaPadding: isSmallScreenWidth && !isKeyboardActive,
-        addOfflineIndicatorBottomSafeAreaPadding: false,
-    });
+    const {paddingBottom: safeAreaPaddingBottom} = useSafeAreaPaddings(true);
+    // On a small screen the popover is a bottom sheet. It makes its own room for the keyboard, in step with the keyboard's
+    // animation, the way the selection list sheets do, instead of leaving that to the modal: the modal's avoidance is a
+    // padding KeyboardAvoidingView at its root, and on Android it measures its frame inside the modal's Dialog window but
+    // places the keyboard against the activity window. Where the Dialog is inset under the status bar (the HybridApp below
+    // Android 15) the lift comes up short by the status bar and leaves the Apply button under the keyboard. The keyboard's
+    // height is the same in both windows, so a sheet padded by it cannot come up short.
+    const shouldPadForKeyboard = isSmallScreenWidth;
+    // The keyboard's offset is negative while it is open. It covers the home indicator, so the sheet pads for whichever is
+    // taller. The offline indicator is drawn on the page behind the sheet, so no room is kept for one.
+    const {height: keyboardOffset} = useReanimatedKeyboardAnimation();
+    const keyboardRoomStyle = useAnimatedStyle(() => ({paddingBottom: Math.max(safeAreaPaddingBottom, -keyboardOffset.get())}));
     const StyleUtils = useStyleUtils();
     const {windowHeight} = useWindowDimensions();
     const triggerRef = useRef<ComponentRef<typeof View> | null>(null);
@@ -109,8 +116,8 @@ function FilterPopupButton({
 
     const calculatePopoverPositionAndToggleOverlay = () => {
         // Dismiss the keyboard before opening the popover. On Android, if a search input is still focused, the
-        // keyboard stays up. The bottom-docked popover's KeyboardAvoidingView then reserves keyboard-height
-        // padding, so the sheet renders mid-screen instead of at the bottom. dismissKeyboardAndExecute waits for
+        // keyboard stays up. The bottom-docked sheet then reserves keyboard-height padding, so it renders
+        // mid-screen instead of at the bottom. dismissKeyboardAndExecute waits for
         // keyboardDidHide on Android before running the callback; on other platforms it runs immediately.
         KeyboardUtils.dismissKeyboardAndExecute(() => {
             calculatePopoverPosition(anchorRef, popoverAnchorAlignment).then((position) => {
@@ -142,7 +149,7 @@ function FilterPopupButton({
             {isFocused && hasEverExpanded && (
                 <PopoverWithMeasuredContent
                     anchorRef={triggerRef}
-                    avoidKeyboard
+                    avoidKeyboard={!shouldPadForKeyboard}
                     isVisible={isOverlayVisible}
                     onClose={toggleOverlay}
                     onModalShow={onModalShow}
@@ -165,7 +172,7 @@ function FilterPopupButton({
                     shouldWrapModalChildrenInScrollViewIfBottomDockedInLandscapeMode={false}
                     enableEdgeToEdgeBottomSafeAreaPadding
                 >
-                    <View style={[containerStyles, bottomSafeAreaPaddingStyle]}>{popoverContent}</View>
+                    <Animated.View style={[containerStyles, shouldPadForKeyboard && keyboardRoomStyle]}>{popoverContent}</Animated.View>
                 </PopoverWithMeasuredContent>
             )}
         </View>
