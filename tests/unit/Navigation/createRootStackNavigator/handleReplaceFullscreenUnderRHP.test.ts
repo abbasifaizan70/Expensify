@@ -1036,6 +1036,54 @@ describe('removeStalePreMountsFromResetAction', () => {
     });
 });
 
+describe('handleRemoveFullscreenUnderRHP — tab navigator pushed over the RHP after the pre-insert (#103777)', () => {
+    function withRoutesOnTop(state: StackNavigationState<ParamListBase>, routesOnTop: TestRoute[]): StackNavigationState<ParamListBase> {
+        const routes = [...state.routes, ...routesOnTop];
+        return {...state, routes, index: routes.length - 1, routeNames: routes.map((r) => r.name)};
+    }
+
+    function preInsertThenPushSecondTab() {
+        // Given a tab-switch pre-insert under the RHP: [Tab(A), RHP] -> [Tab(A'), RHP]
+        mockStubbedParsedState = makeParsedState(INCOMING_SPLIT_ONLY);
+        const existingState = makeExistingState([{name: SCREENS.WORKSPACES_LIST}]);
+        const preInsertedState = handleReplaceFullscreenUnderRHP(existingState, makeAction(), CONFIG_OPTIONS, stackRouter);
+        if (!preInsertedState) {
+            throw new Error('Expected the pre-insert to return a navigation state');
+        }
+
+        // And a second tab navigator pushed over that RHP (e.g. "Go to Subscription"), with a new RHP on top:
+        // [Tab(A'), RHP, Tab(B), RHP2]
+        const pushedTabRoute = makeRoute(NAVIGATORS.TAB_NAVIGATOR, undefined, {index: 0, routes: [{key: 'settings-split-key', name: NAVIGATORS.SETTINGS_SPLIT_NAVIGATOR}]}, 'tab-nav-key-2');
+        const secondRHPRoute = makeRoute(NAVIGATORS.RIGHT_MODAL_NAVIGATOR, undefined, undefined, 'rhp-key-2');
+        return {preInsertedState, pushedTabRoute, secondRHPRoute, stateWithPushedTab: withRoutesOnTop(preInsertedState, [pushedTabRoute, secondRHPRoute])};
+    }
+
+    it('restores the original tab route into its own slot and leaves the pushed tab navigator alone', () => {
+        const {pushedTabRoute, stateWithPushedTab} = preInsertThenPushSecondTab();
+
+        // When the first flow's pre-insert is cancelled while the second RHP is on top
+        const restoredState = handleRemoveFullscreenUnderRHP(stateWithPushedTab, makeRemoveAction(), CONFIG_OPTIONS, stackRouter);
+
+        // Then every root route keeps its own key (no duplicate TAB_NAVIGATOR key), the original tab is back in slot 0
+        // and the tab navigator pushed later is untouched
+        expect(restoredState?.routes.map((r) => r.key)).toEqual(['tab-nav-key', 'rhp-key', 'tab-nav-key-2', 'rhp-key-2']);
+        expect(new Set(restoredState?.routes.map((r) => r.key)).size).toBe(restoredState?.routes.length);
+        expect(getWorkspaceNavInnerRoutes(restoredState).names).toEqual([SCREENS.WORKSPACES_LIST]);
+        expect(restoredState?.routes.at(2)).toBe(pushedTabRoute);
+    });
+
+    it('drops the saved route and returns null when the pre-inserted tab navigator is no longer in the stack', () => {
+        const {preInsertedState, pushedTabRoute, secondRHPRoute} = preInsertThenPushSecondTab();
+        const stateWithoutOriginalTab = withRoutesOnTop({...preInsertedState, routes: preInsertedState.routes.slice(1)}, [pushedTabRoute, secondRHPRoute]);
+
+        // When the pre-insert is cancelled after the original tab navigator was removed
+        const restoredState = handleRemoveFullscreenUnderRHP(stateWithoutOriginalTab, makeRemoveAction(), CONFIG_OPTIONS, stackRouter);
+
+        // Then the pushed tab navigator is not overwritten with the stale route
+        expect(restoredState).toBeNull();
+    });
+});
+
 describe('handleRemoveFullscreenUnderRHP — Share modal host', () => {
     it('restores the original tab route when the Share modal, not the RHP, is on top', () => {
         // Given a tab-switch pre-insert performed under the Share modal (#100767)

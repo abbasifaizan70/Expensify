@@ -761,13 +761,15 @@ function handleRemoveFullscreenUnderRHP(
 
     // Tab-switch path: restore the original TAB_NAVIGATOR route saved during pre-insertion.
     if (preInsertedOriginalTabRoute) {
-        const tabNavIndex = routesWithoutRHP.findLastIndex((r) => r.name === NAVIGATORS.TAB_NAVIGATOR);
-        if (tabNavIndex < 0) {
-            preInsertedOriginalTabRoute = undefined;
-            return null;
-        }
+        // The pre-insert swapped the state of this exact route and kept its key, so the original goes back into that slot.
+        // Looking up the last TAB_NAVIGATOR by name instead targets a tab navigator pushed over the RHP after the pre-insert
+        // (e.g. "Go to Subscription" from the expense flow), which leaves two root routes with the same key (#103777).
         const originalRoute = preInsertedOriginalTabRoute;
         preInsertedOriginalTabRoute = undefined;
+        const tabNavIndex = routesWithoutRHP.findIndex((r) => r.key === originalRoute.key);
+        if (tabNavIndex < 0) {
+            return null;
+        }
         const newRoutes = [...routesWithoutRHP.slice(0, tabNavIndex), originalRoute, ...routesWithoutRHP.slice(tabNavIndex + 1), rhpRoute];
         return stackRouter.getRehydratedState({...state, routes: newRoutes, index: newRoutes.length - 1}, configOptions);
     }

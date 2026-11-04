@@ -75,15 +75,15 @@ function revertPreMountBufferIfRHPClosed() {
     if (mode === 'tab') {
         const originalTabRoute = getPreInsertedOriginalTabRoute();
         clearPreInsertedOriginalTabRoute();
-        const tabNavIndex = rootState.routes.findLastIndex((r) => r.name === NAVIGATORS.TAB_NAVIGATOR);
-        if (!originalTabRoute || tabNavIndex < 0) {
+        // The original goes back into the route the pre-insert modified (same key), not into whichever tab navigator is last.
+        const hasOriginalTabSlot = !!originalTabRoute && rootState.routes.some((r) => r.key === originalTabRoute.key);
+        if (!originalTabRoute || !hasOriginalTabSlot) {
             const fallbackRoutes = rootState.routes.filter((r) => r.key !== bufferRouteKey);
             navigationRef.current?.dispatch(CommonActions.reset({...rootState, routes: fallbackRoutes, index: fallbackRoutes.length - 1}));
             return;
         }
         const withoutBuffer = rootState.routes.filter((r) => r.key !== bufferRouteKey);
-        const lastTabIndex = withoutBuffer.findLastIndex((r) => r.name === NAVIGATORS.TAB_NAVIGATOR);
-        const newRoutes = withoutBuffer.map((r, i) => (i === lastTabIndex ? originalTabRoute : r));
+        const newRoutes = withoutBuffer.map((r) => (r.key === originalTabRoute.key ? originalTabRoute : r));
         navigationRef.current?.dispatch(CommonActions.reset({...rootState, routes: newRoutes, index: newRoutes.length - 1}));
         return;
     }
@@ -117,8 +117,9 @@ function recoverFromPreMountBuffer() {
     // switched tabs, otherwise remove both Buffer and the speculative pushed destination.
     const originalTabRoute = getPreInsertedOriginalTabRoute();
     const routesWithoutBuffer = rootState.routes.slice(0, -1);
-    const tabNavIndex = originalTabRoute ? routesWithoutBuffer.findLastIndex((route) => route.name === NAVIGATORS.TAB_NAVIGATOR) : -1;
-    const routes = originalTabRoute && tabNavIndex >= 0 ? routesWithoutBuffer.map((route, index) => (index === tabNavIndex ? originalTabRoute : route)) : rootState.routes.slice(0, -2);
+    const hasOriginalTabSlot = !!originalTabRoute && routesWithoutBuffer.some((route) => route.key === originalTabRoute.key);
+    const routes =
+        originalTabRoute && hasOriginalTabSlot ? routesWithoutBuffer.map((route) => (route.key === originalTabRoute.key ? originalTabRoute : route)) : rootState.routes.slice(0, -2);
     if (!routes.length) {
         return;
     }
