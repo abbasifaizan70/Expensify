@@ -10,6 +10,7 @@ import TextInput from '@components/TextInput';
 import useDynamicBackPath from '@hooks/useDynamicBackPath';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
+import usePersonalDetailByLogin from '@hooks/usePersonalDetailByLogin';
 import {usePersonalDetail} from '@hooks/usePersonalDetails';
 import useThemeStyles from '@hooks/useThemeStyles';
 
@@ -17,6 +18,7 @@ import Navigation from '@libs/Navigation/Navigation';
 import type {PlatformStackScreenProps} from '@libs/Navigation/PlatformStackNavigation/types';
 import type {SettingsNavigatorParamList} from '@libs/Navigation/types';
 import {getDisplayNameErrors} from '@libs/ValidationUtils';
+import {getMemberLoginByAccountID} from '@libs/WorkArrangementUtils';
 
 import AccessOrNotFoundWrapper from '@pages/workspace/AccessOrNotFoundWrapper';
 
@@ -37,12 +39,18 @@ type WorkspaceMemberDisplayNamePageProps = PlatformStackScreenProps<SettingsNavi
 function WorkspaceMemberDisplayNamePage({route}: WorkspaceMemberDisplayNamePageProps) {
     const styles = useThemeStyles();
     const {translate, formatPhoneNumber} = useLocalize();
-    const accountID = Number(route.params.accountID);
+    const routeAccountID = Number(route.params.accountID);
     const policyID = route.params.policyID;
-    const [memberPersonalDetails, memberPersonalDetailsResult] = usePersonalDetail(accountID);
+    const [routePersonalDetails, routePersonalDetailsResult] = usePersonalDetail(routeAccountID);
     const [policy] = useOnyx(`${ONYXKEYS.COLLECTION.POLICY}${policyID}`);
-    const memberLogin = memberPersonalDetails?.login;
-    const isLoadingMemberPersonalDetails = isLoadingOnyxValue(memberPersonalDetailsResult);
+
+    // The route can hold an accountID generated from the login (an invite still in flight, or a member whose personal details
+    // didn't load), which has no personal details entry. Resolve the member the same way as Member details: recover the login
+    // from the policy, then read the personal details by login so we edit the member's real entry.
+    const memberLogin = routePersonalDetails?.login ?? getMemberLoginByAccountID(policy, routeAccountID);
+    const memberPersonalDetails = usePersonalDetailByLogin(memberLogin);
+    const accountID = memberPersonalDetails?.accountID ?? routeAccountID;
+    const isLoadingMemberPersonalDetails = isLoadingOnyxValue(routePersonalDetailsResult);
     const hasDisplayNameSet = !!memberPersonalDetails?.firstName || !!memberPersonalDetails?.lastName;
     const isPolicyMember = !!memberLogin && !!policy?.employeeList?.[memberLogin];
     const backPath = useDynamicBackPath(DYNAMIC_ROUTES.WORKSPACE_MEMBER_DISPLAY_NAME.path);
