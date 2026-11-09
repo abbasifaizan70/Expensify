@@ -157,7 +157,12 @@ function getActionPayloadScreenName(action: NavigationAction): string | undefine
  * the setup flow while this modal is still underneath.
  */
 function shouldBlockWhileModalActive(state: NavigationState, action: NavigationAction): boolean {
-    const isAllowedAction = action.type === CONST.NAVIGATION.ACTION_TYPE.DISMISS_MODAL || action.type === CONST.NAVIGATION.ACTION_TYPE.GO_BACK;
+    // REPLACE_FULLSCREEN_UNDER_RHP only swaps the screen under the modal (the modal's own close uses it before
+    // DISMISS_MODAL), so it can't push a tab over the modal like the actions this check exists to stop.
+    const isAllowedAction =
+        action.type === CONST.NAVIGATION.ACTION_TYPE.DISMISS_MODAL ||
+        action.type === CONST.NAVIGATION.ACTION_TYPE.GO_BACK ||
+        action.type === CONST.NAVIGATION.ACTION_TYPE.REPLACE_FULLSCREEN_UNDER_RHP;
     const isRequiredTwoFactorSetupNavigation = isRequiredTwoFactorSetupExceptionActive() && isTwoFactorSetupScreen(getActionPayloadScreenName(action));
     return (
         hasRedirectedToMigratedUserModal &&

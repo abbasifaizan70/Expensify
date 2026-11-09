@@ -387,6 +387,28 @@ describe('MigratedUserWelcomeModalGuard', () => {
             expect(result.type).not.toBe('BLOCK');
         });
 
+        it('should allow REPLACE_FULLSCREEN_UNDER_RHP when the migrated user modal is on top', async () => {
+            // Given the guard redirected to the welcome modal and the dismissal is not saved yet
+            await Onyx.merge(ONYXKEYS.NVP_TRY_NEW_DOT, {
+                nudgeMigration: {
+                    timestamp: new Date(),
+                    cohort: 'test',
+                },
+            });
+            await waitForBatchedUpdates();
+            MigratedUserWelcomeModalGuard.evaluate(mockState, mockAction, defaultContext);
+
+            // When the modal's close puts Spend under it before dismissing (the dismissal is saved only once the modal is removed)
+            const replaceUnderModalAction: NavigationAction = {
+                type: CONST.NAVIGATION.ACTION_TYPE.REPLACE_FULLSCREEN_UNDER_RHP,
+                payload: {route: 'search'},
+            };
+            const result = MigratedUserWelcomeModalGuard.evaluate(stateWithModalOnTop, replaceUnderModalAction, defaultContext);
+
+            // Then it is allowed, since it only swaps the screen under the modal and can't push a tab over it
+            expect(result.type).not.toBe('BLOCK');
+        });
+
         it('should not block when the modal has been dismissed', async () => {
             await Onyx.merge(ONYXKEYS.NVP_TRY_NEW_DOT, {
                 nudgeMigration: {

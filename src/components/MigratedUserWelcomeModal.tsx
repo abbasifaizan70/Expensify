@@ -19,7 +19,7 @@ import variables from '@styles/variables';
 import CONST from '@src/CONST';
 import ROUTES from '@src/ROUTES';
 
-import React from 'react';
+import React, {useRef} from 'react';
 import {View} from 'react-native';
 
 import CenteredModalLayout from './CenteredModalLayout';
@@ -36,6 +36,7 @@ function MigratedUserWelcomeModal() {
     const isReduceMotionEnabled = Accessibility.useReducedMotion();
     const illustrations = useMemoizedLazyIllustrations(['ChatBubbles', 'ConciergeBot', 'PlanetWithMobileApp', 'MagnifyingGlassReceipt']);
     const isCurrentUserPolicyAdmin = useIsPaidPolicyAdmin();
+    const hasStartedClosingRef = useRef(false);
 
     const ExpensifyFeatures = [
         {
@@ -60,10 +61,17 @@ function MigratedUserWelcomeModal() {
     useBeforeRemove(persistDismissal);
 
     const handleClose = () => {
+        // The confirm button, the close button and the full-screen backdrop all call this. Repeated taps during the
+        // fade-out must not start another root-stack change while iOS is still dismissing the transparent modal.
+        if (hasStartedClosingRef.current) {
+            return;
+        }
+        hasStartedClosingRef.current = true;
+
+        // Put Spend under the modal first, then dismiss it, so iOS runs a single modal dismissal instead of a
+        // dismissal followed by a separate navigation that can land while the dismissal is still running.
         const spendRoute = ROUTES.SEARCH_ROOT.getRoute({query: buildCannedSearchQuery({type: CONST.SEARCH.DATA_TYPES.EXPENSE_REPORT}), searchKey: CONST.SEARCH.SEARCH_KEYS.REPORTS});
-        Navigation.goBack(undefined, {
-            afterTransition: () => Navigation.navigate(spendRoute),
-        });
+        Navigation.revealRouteBeforeDismissingModal(spendRoute);
     };
 
     const onHelp = () => {
