@@ -5,7 +5,9 @@ import Icon from '@components/Icon';
 import type {TableData} from '@components/Table';
 import Table from '@components/Table';
 import {getCellAccessibilityProps, shouldUseTableSemantics} from '@components/Table/tableAccessibility';
+import Text from '@components/Text';
 import TextWithTooltip from '@components/TextWithTooltip';
+import Tooltip from '@components/Tooltip';
 
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
@@ -13,6 +15,7 @@ import useTheme from '@hooks/useTheme';
 import useThemeStyles from '@hooks/useThemeStyles';
 
 import {formatMaskedCardName, getCompanyCardFeed} from '@libs/CardUtils';
+import type {CardLastUpdatedDisplay} from '@libs/CardUtils';
 import createDynamicRoute from '@libs/Navigation/helpers/dynamicRoutesUtils/createDynamicRoute';
 import Navigation from '@libs/Navigation/Navigation';
 
@@ -40,6 +43,10 @@ type WorkspaceCompanyCardTableRowData = TableData &
         onRenameName?: (newName: string) => void;
 
         exportAccountTitle?: string;
+
+        /** The card's last successful sync. Undefined for unassigned cards, which have no sync history. */
+        lastUpdated?: CardLastUpdatedDisplay;
+
         onDismissError?: () => void;
     };
 
@@ -125,7 +132,13 @@ function WorkspaceCompanyCardTableRow({
         return Navigation.navigate(createDynamicRoute(DYNAMIC_ROUTES.WORKSPACE_COMPANY_CARD_DETAILS.getRoute(feedName, cardID.toString())));
     };
 
-    const accessibilityLabel = [memberColumnTitle, formattedCardDetails, formattedCustomCardName, item.exportAccountTitle].filter(Boolean).join(', ');
+    const lastUpdatedText = item.lastUpdated?.text;
+    // Only describe a real sync in the tooltip, never "Updating..." or "Never".
+    const lastSuccessfulSyncText = item.lastUpdated?.fullText ? translate('workspace.moreFeatures.companyCards.lastSuccessfulSync', item.lastUpdated.fullText) : undefined;
+    // A bare date or "Never" means nothing when read out on its own, so the label names the column.
+    const lastUpdatedAccessibilityLabel = lastUpdatedText ? `${translate('workspace.moreFeatures.companyCards.lastUpdated')}: ${lastUpdatedText}` : undefined;
+
+    const accessibilityLabel = [memberColumnTitle, formattedCardDetails, formattedCustomCardName, item.exportAccountTitle, lastUpdatedAccessibilityLabel].filter(Boolean).join(', ');
 
     return (
         <Table.Row
@@ -212,6 +225,24 @@ function WorkspaceCompanyCardTableRow({
                                 text={item.exportAccountTitle ?? ''}
                                 style={[styles.lh16, styles.optionDisplayName, styles.pre]}
                             />
+                        </View>
+                    )}
+
+                    {!shouldUseNarrowTableLayout && (
+                        <View
+                            style={[styles.flex1, styles.mnw0, styles.justifyContentCenter]}
+                            {...getCellAccessibilityProps(isTableSemanticsEnabled)}
+                        >
+                            {!!lastUpdatedText && (
+                                <Tooltip text={lastSuccessfulSyncText}>
+                                    <Text
+                                        numberOfLines={1}
+                                        style={[styles.lh16, styles.optionDisplayName, styles.pre]}
+                                    >
+                                        {lastUpdatedText}
+                                    </Text>
+                                </Tooltip>
+                            )}
                         </View>
                     )}
 

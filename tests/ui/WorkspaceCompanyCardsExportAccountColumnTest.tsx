@@ -402,3 +402,87 @@ describe('WorkspaceCompanyCardsTable row feedback', () => {
         expect(capturedData.at(0)?.errors).toEqual({[START_DATE_ERROR_KEY]: 'Start date update failed'});
     });
 });
+
+describe('WorkspaceCompanyCardsTable Last updated column', () => {
+    beforeEach(async () => {
+        mockCardFeedErrors = {};
+        await Onyx.clear();
+        await waitForBatchedUpdates();
+    });
+
+    it('adds a sortable Last updated column right before the actions column', async () => {
+        renderTable(buildCompanyCards(buildAssignedCard({lastScrape: '2026-11-04 18:54:12'})));
+        await waitForBatchedUpdates();
+
+        const columnKeys = capturedColumns.map((column) => column.key);
+        const lastUpdatedColumn = capturedColumns.find((column) => column.key === 'lastUpdated');
+        expect(lastUpdatedColumn?.label).toBe(TestHelper.translateLocal('workspace.moreFeatures.companyCards.lastUpdated'));
+        expect(lastUpdatedColumn?.sortable).toBe(true);
+        expect(columnKeys.indexOf('lastUpdated')).toBe(columnKeys.indexOf('actions') - 1);
+    });
+
+    it('gives an assigned card its last successful sync', async () => {
+        // Given an assigned card that synced successfully
+        renderTable(buildCompanyCards(buildAssignedCard({lastScrape: '2026-11-04 18:54:12'})));
+        await waitForBatchedUpdates();
+
+        // Then its row carries the sync time as a sort key and the full details page value for the tooltip
+        const lastUpdated = capturedData.at(0)?.lastUpdated;
+        expect(lastUpdated?.timestamp).toBe(Date.UTC(2026, 10, 4, 18, 54, 12));
+        expect(lastUpdated?.fullText).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+        expect(lastUpdated?.text).not.toBe(TestHelper.translateLocal('workspace.moreFeatures.companyCards.neverUpdated'));
+    });
+
+    it('shows Never for an assigned card that never synced', async () => {
+        renderTable(buildCompanyCards(buildAssignedCard({lastScrape: ''})));
+        await waitForBatchedUpdates();
+
+        expect(capturedData.at(0)?.lastUpdated).toEqual({text: TestHelper.translateLocal('workspace.moreFeatures.companyCards.neverUpdated')});
+    });
+
+    it('shows Updating... while the card is updating', async () => {
+        renderTable(buildCompanyCards(buildAssignedCard({lastScrape: '2026-11-04 18:54:12', isLoadingLastUpdated: true})));
+        await waitForBatchedUpdates();
+
+        expect(capturedData.at(0)?.lastUpdated?.text).toBe(TestHelper.translateLocal('workspace.moreFeatures.companyCards.updating'));
+        expect(capturedData.at(0)?.lastUpdated?.timestamp).toBe(Date.UTC(2026, 10, 4, 18, 54, 12));
+    });
+
+    it('leaves the cell empty for an unassigned card', async () => {
+        renderTable(buildCompanyCards(undefined));
+        await waitForBatchedUpdates();
+
+        expect(capturedData.at(0)?.isAssigned).toBe(false);
+        expect(capturedData.at(0)?.lastUpdated).toBeUndefined();
+    });
+
+    it('sorts the stalest cards first and keeps unassigned cards last in both directions', async () => {
+        renderTable(buildCompanyCards(buildAssignedCard()));
+        await waitForBatchedUpdates();
+        expect(capturedCompareItems).toBeDefined();
+
+        const buildRow = (keyForList: string, cardName: string, isAssigned: boolean, timestamp?: number) =>
+            createMock<WorkspaceCompanyCardTableItemData>({
+                keyForList,
+                cardName,
+                isAssigned,
+                isCardDeleted: false,
+                lastUpdated: isAssigned ? {text: keyForList, timestamp} : undefined,
+            });
+        const rows = [
+            buildRow('recent', '1111', true, Date.UTC(2026, 10, 4)),
+            buildRow('unassigned', '0000', false),
+            buildRow('stale', '2222', true, Date.UTC(2026, 6, 1)),
+            buildRow('never', '3333', true),
+            buildRow('staleTie', '1234', true, Date.UTC(2026, 6, 1)),
+        ];
+        const sortBy = (order: typeof CONST.SEARCH.SORT_ORDER.ASC | typeof CONST.SEARCH.SORT_ORDER.DESC) =>
+            [...rows].sort((a, b) => capturedCompareItems?.(a, b, {columnKey: 'lastUpdated', order}) ?? 0).map((row) => row.keyForList);
+
+        // Ascending opens on the card that never synced, then the oldest syncs, with ties broken by card name
+        expect(sortBy(CONST.SEARCH.SORT_ORDER.ASC)).toEqual(['never', 'staleTie', 'stale', 'recent', 'unassigned']);
+
+        // Descending opens on the most recent sync, and unassigned cards, which have no sync, still come last
+        expect(sortBy(CONST.SEARCH.SORT_ORDER.DESC)).toEqual(['recent', 'stale', 'staleTie', 'never', 'unassigned']);
+    });
+});

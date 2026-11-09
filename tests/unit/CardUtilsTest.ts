@@ -81,6 +81,7 @@ import {
     isCardAlreadyAssigned,
     isCardConnectionBroken,
     isCardFrozen,
+    getCardLastUpdatedDisplay,
     isLastScrapePastDismissThreshold,
     isCSVFeedOrExpensifyCard,
     isCSVUploadFeed,
@@ -5775,5 +5776,72 @@ describe('canResolveTransactionCard', () => {
 
         // Then it cannot, since a move the backend refuses costs the whole batch
         expect(canResolve).toBe(false);
+    });
+});
+
+describe('getCardLastUpdatedDisplay', () => {
+    const getLocalDateInLosAngeles = (datetime?: string) => DateUtils.getLocalDateFromDatetime(CONST.LOCALES.EN, 'America/Los_Angeles', datetime);
+    const buildCard = (overrides: Partial<Card>) => createMock<Card>({cardID: 1, bank: CONST.COMPANY_CARD.FEED_BANK_NAME.CHASE, ...overrides});
+    const getDisplay = (overrides: Partial<Card>) => getCardLastUpdatedDisplay(buildCard(overrides), translateLocal, getLocalDateInLosAngeles, undefined);
+
+    beforeAll(() => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-11-10T12:00:00Z'));
+    });
+
+    afterAll(() => {
+        jest.useRealTimers();
+    });
+
+    it('abbreviates the sync in the user timezone and keeps the exact details page value', () => {
+        // Given a card that last synced at 02:30 UTC on Nov 5, which is still Nov 4 for an admin in Los Angeles
+        // When the table builds its Last updated value
+        const display = getDisplay({lastScrape: '2026-11-05 02:30:00'});
+
+        // Then the cell shows the local day like a Spend date, and the full value matches the card details page
+        expect(display).toEqual({text: 'Nov 4', fullText: '2026-11-04 18:30:00', timestamp: Date.UTC(2026, 10, 5, 2, 30)});
+    });
+
+    it('adds the year when the local sync date is in a past year', () => {
+        // Given a card that synced on Jan 1 UTC, which is still Dec 31 of the previous year in Los Angeles
+        const display = getDisplay({lastScrape: '2026-01-01 05:00:00'});
+
+        // Then the cell shows the local date with its year
+        expect(display.text).toBe('Dec 31, 2025');
+        expect(display.fullText).toBe('2025-12-31 21:00:00');
+    });
+
+    it('reads an ISO 8601 value too', () => {
+        const display = getDisplay({lastScrape: '2026-11-04T10:00:00.000Z'});
+
+        // Los Angeles is on PST (UTC-8) by then
+        expect(display).toEqual({text: 'Nov 4', fullText: '2026-11-04 02:00:00', timestamp: Date.UTC(2026, 10, 4, 10)});
+    });
+
+    it('shows Never for a card that never synced', () => {
+        expect(getDisplay({lastScrape: ''})).toEqual({text: translateLocal('workspace.moreFeatures.companyCards.neverUpdated')});
+        expect(getDisplay({lastScrape: undefined})).toEqual({text: translateLocal('workspace.moreFeatures.companyCards.neverUpdated')});
+    });
+
+    it('shows Never instead of throwing for a malformed value', () => {
+        // Given a value date-fns can't format, which would otherwise throw and break the whole table
+        // Then the card is treated as never synced
+        expect(getDisplay({lastScrape: 'not a date'})).toEqual({text: translateLocal('workspace.moreFeatures.companyCards.neverUpdated')});
+    });
+
+    it('shows Updating... while an update runs but keeps the last successful sync for the tooltip and sorting', () => {
+        // Given an update in progress on a card that synced before
+        const display = getDisplay({lastScrape: '2026-11-05 02:30:00', isLoadingLastUpdated: true});
+
+        // Then the cell matches the details page, and the last success is kept so the row doesn't move in a sorted table
+        expect(display).toEqual({
+            text: translateLocal('workspace.moreFeatures.companyCards.updating'),
+            fullText: '2026-11-04 18:30:00',
+            timestamp: Date.UTC(2026, 10, 5, 2, 30),
+        });
+    });
+
+    it('shows Updating... with no sync to describe for a card that never synced', () => {
+        expect(getDisplay({lastScrape: '', isLoadingLastUpdated: true})).toEqual({text: translateLocal('workspace.moreFeatures.companyCards.updating')});
     });
 });

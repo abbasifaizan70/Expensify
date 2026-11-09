@@ -21,7 +21,7 @@ import useThemeStyles from '@hooks/useThemeStyles';
 
 import {clearCompanyCardErrorField, resetFailedWorkspaceCompanyCardUnassignment} from '@libs/actions/CompanyCards';
 import {renameCompanyCardInline} from '@libs/actions/Policy/InlineEdit';
-import {formatMaskedCardName, getCompanyCardCustomName, getDefaultCardName} from '@libs/CardUtils';
+import {formatMaskedCardName, getCardLastUpdatedDisplay, getCompanyCardCustomName, getDefaultCardName} from '@libs/CardUtils';
 import {getLatestErrorField} from '@libs/ErrorUtils';
 import {getConnectedIntegration} from '@libs/PolicyUtils';
 import showInlineEditError from '@libs/showInlineEditError';
@@ -53,7 +53,7 @@ import WorkspaceCompanyCardsTableControls from './WorkspaceCompanyCardsTableCont
 import WorkspaceCompanyCardsTableHeaderButtons from './WorkspaceCompanyCardsTableHeaderButtons';
 import WorkspaceCompanyCardTableItem from './WorkspaceCompanyCardsTableRow';
 
-type CompanyCardsTableColumnKey = 'member' | 'card' | 'customCardName' | 'exportAccount' | 'actions';
+type CompanyCardsTableColumnKey = 'member' | 'card' | 'customCardName' | 'exportAccount' | 'lastUpdated' | 'actions';
 
 type WorkspaceCompanyCardsTableHandle = {
     clearSelection: () => void;
@@ -102,7 +102,7 @@ function WorkspaceCompanyCardsTable({
 }: WorkspaceCompanyCardsTableProps) {
     const styles = useThemeStyles();
     const {isOffline} = useNetwork();
-    const {translate, localeCompare, formatPhoneNumber} = useLocalize();
+    const {translate, localeCompare, formatPhoneNumber, getLocalDateFromDatetime, dateFnsLocale} = useLocalize();
     const {shouldUseNarrowLayout, isMediumScreenWidth} = useResponsiveLayout();
     const tableRef = useRef<TableHandle<WorkspaceCompanyCardTableItemData, CompanyCardsTableColumnKey>>(null);
 
@@ -258,6 +258,19 @@ function WorkspaceCompanyCardsTable({
         },
         ...(shouldShowExportAccountColumn ? [getExportAccountColumn<WorkspaceCompanyCardTableItemData>(translate('workspace.moreFeatures.companyCards.exportAccount'), styles)] : []),
         {
+            key: 'lastUpdated',
+            label: translate('workspace.moreFeatures.companyCards.lastUpdated'),
+            sortable: true,
+            styling: {
+                containerStyles: [styles.mnw0],
+            },
+            dynamicSizing: {
+                getContentToMeasure: (item) => (item.lastUpdated ? [{text: item.lastUpdated.text, fontSize: fontScale.text}] : []),
+                // A short date, "Never" or "Updating...", so the column always fits its values in full.
+                shouldFitContent: true,
+            },
+        },
+        {
             key: 'actions',
             label: '',
             sortable: false,
@@ -309,6 +322,8 @@ function WorkspaceCompanyCardsTable({
                       cardholder,
                       // Unassigned cards have no details page and so no Accounting section to match, hence no title.
                       exportAccountTitle: shouldShowExportAccountColumn && assignedCard ? getCardExportAccountTitle(cardExportSettings, assignedCard) : undefined,
+                      // Unassigned cards have no card record and so no sync history, which leaves their cell empty.
+                      lastUpdated: assignedCard ? getCardLastUpdatedDisplay(assignedCard, translate, getLocalDateFromDatetime, dateFnsLocale) : undefined,
                       errors: rowErrors,
                       pendingAction: assignedCard?.pendingAction ?? assignedCard?.pendingFields?.scrapeMinDate,
                       canEditName,
@@ -352,6 +367,23 @@ function WorkspaceCompanyCardsTable({
 
     const compareItems: CompareItemsCallback<WorkspaceCompanyCardTableItemData, CompanyCardsTableColumnKey> = (a, b, activeSorting) => {
         const orderMultiplier = activeSorting.order === 'asc' ? 1 : -1;
+
+        if (activeSorting.columnKey === 'lastUpdated') {
+            // Unassigned cards have no sync history, so they stay below the assigned ones in both directions. That way
+            // ascending opens on the cards that never synced or synced longest ago, which is why admins sort this column.
+            if (a.isAssigned !== b.isAssigned) {
+                return a.isAssigned ? -1 : 1;
+            }
+
+            // A card that never synced counts as the oldest. A card that is updating keeps its last successful sync, so it doesn't jump.
+            const aTimestamp = a.lastUpdated?.timestamp ?? Number.NEGATIVE_INFINITY;
+            const bTimestamp = b.lastUpdated?.timestamp ?? Number.NEGATIVE_INFINITY;
+            if (aTimestamp !== bTimestamp) {
+                return (aTimestamp < bTimestamp ? -1 : 1) * orderMultiplier;
+            }
+
+            return localeCompare(a.cardName, b.cardName) * orderMultiplier;
+        }
 
         if (a.isAssigned && !b.isAssigned) {
             return 1 * orderMultiplier;

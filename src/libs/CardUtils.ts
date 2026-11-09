@@ -54,7 +54,7 @@ import type {Locale as DateFnsLocale} from 'date-fns';
 import type {OnyxCollection, OnyxEntry} from 'react-native-onyx';
 import type {TupleToUnion, ValueOf} from 'type-fest';
 
-import {format, fromUnixTime, isBefore} from 'date-fns';
+import {format, fromUnixTime, isBefore, isValid} from 'date-fns';
 import groupBy from 'lodash/groupBy';
 import lodashSortBy from 'lodash/sortBy';
 
@@ -1837,6 +1837,60 @@ function isLastScrapePastDismissThreshold(card: Card): boolean {
     return DateUtils.getDifferenceInDaysFromNow(lastScrapeDate) >= CONST.COMPANY_CARDS.BROKEN_CONNECTION_DISMISS_AFTER_DAYS;
 }
 
+type CardLastUpdatedDisplay = {
+    /** The cell text: the local date abbreviated like Spend dates, "Updating..." while an update runs, or "Never" */
+    text: string;
+
+    /** The last successful sync exactly as the card details page shows it, or undefined when the card never synced */
+    fullText?: string;
+
+    /** Epoch milliseconds of the last successful sync, used for sorting, or undefined when the card never synced */
+    timestamp?: number;
+};
+
+/**
+ * Builds the "Last updated" value the Company cards table shows for an assigned card.
+ *
+ * `lastScrape` is the last successful sync and is kept while an update is pending or after it fails, so `fullText` and
+ * `timestamp` always describe the last success. The cell says "Updating..." while an update runs, like the details page.
+ * The date is converted to the user's timezone the same way as on the details page, so both screens show the same day.
+ *
+ * @param card the assigned card to read
+ * @param translate the translate function
+ * @param getLocalDateFromDatetime converts a UTC datetime into the user's timezone
+ * @param dateFnsLocale the locale used to abbreviate the month
+ * @returns the cell text, the details page text and the sort key
+ */
+function getCardLastUpdatedDisplay(
+    card: Card,
+    translate: LocalizedTranslate,
+    getLocalDateFromDatetime: LocaleContextProps['getLocalDateFromDatetime'],
+    dateFnsLocale: DateFnsLocale | undefined,
+): CardLastUpdatedDisplay {
+    const lastScrapeDate = parseCardLastScrape(card);
+    const localDate = lastScrapeDate ? getLocalDateFromDatetime(card.lastScrape) : undefined;
+
+    // A malformed value would make `format` throw and take the whole table down, so it counts as never synced instead.
+    const lastSync = lastScrapeDate && localDate && isValid(localDate) ? {localDate, timestamp: lastScrapeDate.getTime()} : undefined;
+    const fullText = lastSync ? format(lastSync.localDate, CONST.DATE.FNS_DATE_TIME_FORMAT_STRING) : undefined;
+
+    if (card.isLoadingLastUpdated) {
+        return {text: translate('workspace.moreFeatures.companyCards.updating'), fullText, timestamp: lastSync?.timestamp};
+    }
+
+    if (!lastSync) {
+        return {text: translate('workspace.moreFeatures.companyCards.neverUpdated')};
+    }
+
+    // Same abbreviation as the Spend date column: the year only shows when it isn't the current one.
+    const isPastYear = lastSync.localDate.getFullYear() !== getLocalDateFromDatetime().getFullYear();
+    return {
+        text: format(lastSync.localDate, isPastYear ? CONST.DATE.MONTH_DAY_YEAR_ABBR_FORMAT : CONST.DATE.MONTH_DAY_ABBR_FORMAT, {locale: dateFnsLocale}),
+        fullText,
+        timestamp: lastSync.timestamp,
+    };
+}
+
 /**
  * Turn the Expensify Card monthly settlement day of the month into a date, so it can be formatted for display.
  *
@@ -2589,6 +2643,7 @@ function getEffectiveFeedReimbursable(value: string | undefined): SelectableFeed
 }
 
 export {
+    getCardLastUpdatedDisplay,
     getEffectiveFeedReimbursable,
     canResolveTransactionCard,
     getAssignedCardSortKey,
@@ -2741,4 +2796,4 @@ export {
     resolveTransactionCardFields,
 };
 
-export type {CompanyCardFeedIcons, CompanyCardBankIcons, CardProgramKey};
+export type {CompanyCardFeedIcons, CompanyCardBankIcons, CardProgramKey, CardLastUpdatedDisplay};
