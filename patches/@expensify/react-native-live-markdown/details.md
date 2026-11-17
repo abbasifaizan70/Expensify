@@ -7,3 +7,10 @@
 - Upstream PR/issue: https://github.com/Expensify/react-native-live-markdown/pull/776 (on hold until the library can rely on React Native 0.88; drop this patch once the app upgrades to a release that contains it)
 - E/App issue: https://github.com/Expensify/App/issues/98254
 - PR introducing patch: https://github.com/Expensify/App/pull/102415
+
+### [@expensify+react-native-live-markdown+0.1.372+002+copy-live-selection.patch](@expensify+react-native-live-markdown+0.1.372+002+copy-live-selection.patch)
+
+- Reason: On web, `MarkdownTextInput` copies and cuts from a cached selection that is only refreshed from React's `onSelect`. React does not emit `onSelect` when a drag selection is released outside of its root (for example below the browser window), so the cache stays collapsed and Cmd+C writes an empty string while the text is still highlighted. The patch syncs the cache with the live DOM selection in `handleCopy` (which `handleCut` also calls) before the text is read. It carries the `src/` and `lib/` parts of the change.
+- Upstream PR/issue: 🛑 TODO (not opened yet; the fix belongs in https://github.com/Expensify/react-native-live-markdown)
+- E/App issue: https://github.com/Expensify/App/issues/107116
+- PR introducing patch: 🛑 TODO
