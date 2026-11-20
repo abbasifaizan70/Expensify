@@ -7,6 +7,7 @@ import type {FormInputErrors, FormOnyxValues, FormRef} from '@components/Form/ty
 import type {AnimatedTextInputRef} from '@components/RNTextInput';
 import TextInput from '@components/TextInput';
 
+import useKeyboardState from '@hooks/useKeyboardState';
 import useLocalize from '@hooks/useLocalize';
 import useOnyx from '@hooks/useOnyx';
 import useScrollOnKeyboardReopen from '@hooks/useScrollOnKeyboardReopen';
@@ -140,6 +141,7 @@ function DescribeRuleForm({
 }: DescribeRuleFormProps) {
     const {translate} = useLocalize();
     const styles = useThemeStyles();
+    const {isKeyboardShown, isKeyboardAnimatingRef} = useKeyboardState();
     const formRef = useRef<FormRef>(null);
     const inputRef = useRef<AnimatedTextInputRef>(null);
     const inputTopOffsetRef = useRef(0);
@@ -293,6 +295,17 @@ function DescribeRuleForm({
         scrollToInput();
     };
 
+    // The input keeps focus and the keyboard stays open while the form scrolls, so editing it again sends no focus or
+    // keyboard event. The caret moves on each key press and on each tap that places it, but not when the form scrolls.
+    const scrollToEditedInput = () => {
+        // The first focus and the Android keyboard reopen already scroll once the keyboard is open.
+        if (!isKeyboardShown || isKeyboardAnimatingRef.current) {
+            return;
+        }
+        // The keyboard is already open, so there is nothing to wait for.
+        scrollToInput(false);
+    };
+
     const describeSuggestedRule = (suggestedPrompt: string) => {
         Log.info('[GenerateRule] Tried the suggested description', false, {policyID, generationID: refusal?.generationID, reason: refusal?.reason});
         formRef.current?.resetForm({[INPUT_IDS.PROMPT]: suggestedPrompt});
@@ -343,6 +356,7 @@ function DescribeRuleForm({
                     onKeyPress={submitFormOnModEnter}
                     onFocus={scrollToFocusedInput}
                     onBlur={resetScrollOnKeyboardReopen}
+                    onSelectionChange={scrollToEditedInput}
                     sentryLabel={CONST.SENTRY_LABEL.WORKSPACE.RULES.DESCRIBE_RULE_INPUT}
                     maxLength={CONST.GENERATED_RULE.PROMPT_MAX_LENGTH}
                     multiline

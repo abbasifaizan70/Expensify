@@ -35,6 +35,7 @@ import waitForBatchedUpdatesWithAct from '../utils/waitForBatchedUpdatesWithAct'
 let mockPrompt = '';
 const mockScrollTo = jest.fn();
 const mockScrollToEnd = jest.fn();
+const mockKeyboardState = {isKeyboardShown: false, isKeyboardAnimatingRef: {current: false}};
 
 jest.mock('@react-navigation/native', () => {
     const actualNavigation = jest.requireActual<typeof ReactNavigationNative>('@react-navigation/native');
@@ -55,6 +56,7 @@ jest.mock('@hooks/useLocalize', () =>
         translate: (key: string, ...params: unknown[]) => [key, ...params].join(' '),
     })),
 );
+jest.mock('@hooks/useKeyboardState', () => jest.fn(() => mockKeyboardState));
 jest.mock('@hooks/usePolicy', () => jest.fn());
 jest.mock('@hooks/useScrollOnKeyboardReopen', () => jest.fn(() => jest.fn()));
 jest.mock('@hooks/useTheme', () => jest.fn(() => ({icon: '#000'})));
@@ -116,8 +118,9 @@ jest.mock('@components/Button', () => {
 });
 jest.mock('@components/Form/InputWrapper', () => {
     const ReactModule = jest.requireActual<typeof React>('react');
-    const {TextInput} = jest.requireActual<{TextInput: React.ComponentType<{accessibilityLabel?: string; onFocus?: () => void}>}>('react-native');
-    return ({accessibilityLabel, onFocus}: {accessibilityLabel: string; onFocus?: () => void}) => ReactModule.createElement(TextInput, {accessibilityLabel, onFocus});
+    const {TextInput} = jest.requireActual<{TextInput: React.ComponentType<{accessibilityLabel?: string; onFocus?: () => void; onSelectionChange?: () => void}>}>('react-native');
+    return ({accessibilityLabel, onFocus, onSelectionChange}: {accessibilityLabel: string; onFocus?: () => void; onSelectionChange?: () => void}) =>
+        ReactModule.createElement(TextInput, {accessibilityLabel, onFocus, onSelectionChange});
 });
 jest.mock('@components/Form/FormProvider', () => {
     const ReactModule = jest.requireActual<typeof React>('react');
@@ -210,6 +213,8 @@ describe('New rule describe section', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockPrompt = '';
+        mockKeyboardState.isKeyboardShown = false;
+        mockKeyboardState.isKeyboardAnimatingRef.current = false;
         writeSpy = jest.spyOn(API, 'write').mockImplementation(() => Promise.resolve());
         setAdminPolicy();
     });
@@ -285,6 +290,51 @@ describe('New rule describe section', () => {
 
         // Then the form bypasses the extra transition wait
         expect(mockScrollTo).toHaveBeenCalledWith(420, false);
+    });
+
+    it('scrolls back to the describe box when the admin edits it again with the keyboard open', async () => {
+        // Given a focused describe box that the admin scrolled out of view while the keyboard stayed open
+        mockKeyboardState.isKeyboardShown = true;
+        await renderRulesNewPage();
+        const input = screen.getByLabelText('workspace.rules.newRule.describeRuleInputLabel');
+        fireEvent(input, 'layout', {nativeEvent: {layout: {x: 0, y: 420, width: 300, height: 96}}});
+
+        // When the admin types again, which moves the caret but sends no focus event
+        fireEvent(input, 'selectionChange', {nativeEvent: {selection: {start: 5, end: 5}}});
+
+        // Then the form scrolls to the box at once, because the keyboard is already open
+        expect(mockScrollTo).toHaveBeenCalledTimes(1);
+        expect(mockScrollTo).toHaveBeenCalledWith(420, false);
+    });
+
+    it('does not scroll on a caret move before the keyboard has opened', async () => {
+        // Given a describe box and a keyboard that is still closed
+        await renderRulesNewPage();
+        const input = screen.getByLabelText('workspace.rules.newRule.describeRuleInputLabel');
+        fireEvent(input, 'layout', {nativeEvent: {layout: {x: 0, y: 420, width: 300, height: 96}}});
+
+        // When the first tap focuses the box and places the caret
+        fireEvent(input, 'focus');
+        fireEvent(input, 'selectionChange', {nativeEvent: {selection: {start: 0, end: 0}}});
+
+        // Then only the focus scroll runs, so the form does not move two times
+        expect(mockScrollTo).toHaveBeenCalledTimes(1);
+        expect(mockScrollTo).toHaveBeenCalledWith(420, true);
+    });
+
+    it('does not scroll on a caret move while the keyboard is animating', async () => {
+        // Given a describe box and a keyboard that is still moving
+        mockKeyboardState.isKeyboardShown = true;
+        mockKeyboardState.isKeyboardAnimatingRef.current = true;
+        await renderRulesNewPage();
+        const input = screen.getByLabelText('workspace.rules.newRule.describeRuleInputLabel');
+        fireEvent(input, 'layout', {nativeEvent: {layout: {x: 0, y: 420, width: 300, height: 96}}});
+
+        // When the caret moves
+        fireEvent(input, 'selectionChange', {nativeEvent: {selection: {start: 5, end: 5}}});
+
+        // Then the form waits for the keyboard instead of scrolling to a viewport that is still changing
+        expect(mockScrollTo).not.toHaveBeenCalled();
     });
 
     it('hides the describe section when New rule opens for a category', async () => {
