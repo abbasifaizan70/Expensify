@@ -1,4 +1,4 @@
-import {makeDefaultPaymentMethod} from '@libs/actions/PaymentMethods';
+import {makeDefaultPaymentMethod, transferWalletBalance} from '@libs/actions/PaymentMethods';
 
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
@@ -86,6 +86,54 @@ describe('actions/PaymentMethods', () => {
             // Then the Members page goes back to the account the backend still has as the default
             const paymentsOn = await getOnyxValue(`${ONYXKEYS.COLLECTION.POLICY_MEMBER_BANK_ACCOUNTS}${PAYMENTS_ON_POLICY_ID}`);
             expect(paymentsOn?.[ACCOUNT_ID]).toEqual(previousBankAccount);
+        });
+    });
+
+    describe('transferWalletBalance', () => {
+        const WALLET_BALANCE = 12400;
+        const transferAccount = createMockPaymentMethod({
+            methodID: BANK_ACCOUNT_ID,
+            accountType: CONST.PAYMENT_METHODS.PERSONAL_BANK_ACCOUNT,
+            accountData: {bankAccountID: BANK_ACCOUNT_ID, accountNumber: 'XXXXXX0000'},
+        });
+
+        beforeEach(async () => {
+            await Onyx.merge(ONYXKEYS.USER_WALLET, {currentBalance: WALLET_BALANCE});
+            await waitForBatchedUpdates();
+        });
+
+        test('clears the wallet balance as soon as the transfer is submitted', async () => {
+            // Given the request is held so the optimistic state can be observed
+            mockFetch.pause?.();
+
+            // When the user transfers their wallet balance
+            transferWalletBalance(transferAccount, WALLET_BALANCE);
+            await waitForBatchedUpdates();
+
+            // Then the balance is already zero, so the Transfer button can't be used again
+            expect((await getOnyxValue(ONYXKEYS.USER_WALLET))?.currentBalance).toBe(0);
+        });
+
+        test('keeps the wallet balance at zero after the transfer succeeds', async () => {
+            // When the transfer succeeds and the response carries no wallet update
+            transferWalletBalance(transferAccount, WALLET_BALANCE);
+            await waitForBatchedUpdates();
+
+            // Then the balance stays zero, so reopening Transfer balance can't send it to another account
+            expect((await getOnyxValue(ONYXKEYS.USER_WALLET))?.currentBalance).toBe(0);
+            expect((await getOnyxValue(ONYXKEYS.WALLET_TRANSFER))?.shouldShowSuccess).toBe(true);
+        });
+
+        test('restores the wallet balance when the transfer fails', async () => {
+            // Given the backend rejects the transfer
+            mockFetch.fail?.();
+
+            // When the user transfers their wallet balance
+            transferWalletBalance(transferAccount, WALLET_BALANCE);
+            await waitForBatchedUpdates();
+
+            // Then the balance comes back so the user can try again
+            expect((await getOnyxValue(ONYXKEYS.USER_WALLET))?.currentBalance).toBe(WALLET_BALANCE);
         });
     });
 });

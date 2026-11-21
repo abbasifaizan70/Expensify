@@ -240,7 +240,7 @@ function TransferBalancePage() {
                         sentryLabel={CONST.SENTRY_LABEL.SETTINGS_WALLET.TRANSFER_SUBMIT}
                         buttonText={translate('transferAmountPage.transfer', isTransferable ? convertToDisplayString(transferAmount, CONST.CURRENCY.USD) : '')}
                         isLoading={walletTransfer?.loading}
-                        onSubmit={() => selectedAccount && transferWalletBalance(selectedAccount)}
+                        onSubmit={() => selectedAccount && transferWalletBalance(selectedAccount, userWallet?.currentBalance ?? 0)}
                         isDisabled={isButtonDisabled || isOffline}
                         message={errorMessage}
                         isAlertVisible={!isEmptyObject(errorMessage)}
