@@ -2,7 +2,7 @@ import type {Errors} from '@src/types/onyx/OnyxCommon';
 
 import type {PropsWithChildren} from 'react';
 
-import React, {createContext, useContext, useState} from 'react';
+import React, {createContext, useContext, useRef, useState} from 'react';
 
 import type {TravelCVVActionsContextType, TravelCVVStateContextType} from './types';
 
@@ -19,6 +19,7 @@ function TravelCVVContextProvider({children}: PropsWithChildren) {
     const [cvv, setCvv] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [validateError, setValidateError] = useState<Errors>({});
+    const isReturningFromVerifyRef = useRef(false);
 
     const stateValue: TravelCVVStateContextType = {
         cvv,
@@ -30,6 +31,7 @@ function TravelCVVContextProvider({children}: PropsWithChildren) {
         setCvv,
         setIsLoading,
         setValidateError,
+        isReturningFromVerifyRef,
     };
 
     return (

@@ -15,6 +15,7 @@ import useThemeStyles from '@hooks/useThemeStyles';
 import useThrottledButtonState from '@hooks/useThrottledButtonState';
 
 import Clipboard from '@libs/Clipboard';
+import deferNavigate from '@libs/Navigation/deferNavigate';
 import Navigation from '@libs/Navigation/Navigation';
 
 import CONST from '@src/CONST';
@@ -46,7 +47,7 @@ function TravelCVVPage() {
 
     // Get CVV from context - shared with TravelCVVVerifyAccountPage
     const {cvv} = useTravelCVVState();
-    const {setCvv} = useTravelCVVActions();
+    const {setCvv, isReturningFromVerifyRef} = useTravelCVVActions();
     const hasRevealedCVV = !!cvv;
 
     const CVV_LENGTH = cvv?.length ?? 3;
@@ -54,8 +55,15 @@ function TravelCVVPage() {
     const cvvDigits = (cvv ?? MASKED_CVV).split('');
 
     // Clear CVV when the page unmounts (e.g. backdrop close) so it doesn't
-    // remain visible the next time the page is opened
-    useEffect(() => () => setCvv(null), [setCvv]);
+    // remain visible the next time the page is opened. Also clear the "returning
+    // from verify" flag so the next fresh visit auto-opens verification again.
+    useEffect(
+        () => () => {
+            setCvv(null);
+            isReturningFromVerifyRef.current = false;
+        },
+        [setCvv, isReturningFromVerifyRef],
+    );
 
     const isSignedInAsDelegate = !!account?.delegatedAccess?.delegate || false;
     const isVerifyAccountInStack = useNavigationState((state) => state.routes.some((route) => route.name === SCREENS.SETTINGS.WALLET.TRAVEL_CVV_VERIFY_ACCOUNT));
@@ -72,6 +80,12 @@ function TravelCVVPage() {
         // they completed or cancelled the validateCode flow and returned here).
         // Skip auto-navigation so we don't push a duplicate screen.
         if (isVerifyAccountInStack) {
+            hasAutoNavigatedRef.current = true;
+            return;
+        }
+        // The user just came back from the verify page, but this page was not under it
+        // (e.g. the verify URL was refreshed), so this is a new instance. Don't send them back.
+        if (isReturningFromVerifyRef.current) {
             hasAutoNavigatedRef.current = true;
             return;
         }
@@ -93,8 +107,13 @@ function TravelCVVPage() {
             return;
         }
         hasAutoNavigatedRef.current = true;
-        Navigation.navigate(ROUTES.SETTINGS_WALLET_TRAVEL_CVV_VERIFY_ACCOUNT);
-    }, [cvv, isSignedInAsDelegate, isOffline, isAccountLocked, isVerifyAccountInStack]);
+        // This effect runs in the same commit that opens the RHP, before the RHP's nested
+        // navigators have registered their state with the root. Navigating now would build a
+        // new RHP holding only the verify page and drop this page from the stack, so Back would
+        // REPLACE in a fresh Travel CVV page that auto-opens verify again. A microtask runs after
+        // every effect of this commit, so verify is pushed on top of this page instead.
+        deferNavigate(() => Navigation.navigate(ROUTES.SETTINGS_WALLET_TRAVEL_CVV_VERIFY_ACCOUNT));
+    }, [cvv, isSignedInAsDelegate, isOffline, isAccountLocked, isVerifyAccountInStack, isReturningFromVerifyRef]);
 
     const handleRevealDetailsPress = () => {
         if (isAccountLocked) {

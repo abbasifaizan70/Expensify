@@ -10,6 +10,7 @@ const defaultTravelCVVActionsContextValue: TravelCVVActionsContextType = {
     setCvv: () => {},
     setIsLoading: () => {},
     setValidateError: () => {},
+    isReturningFromVerifyRef: {current: false},
 };
 
 export {defaultTravelCVVStateContextValue, defaultTravelCVVActionsContextValue};

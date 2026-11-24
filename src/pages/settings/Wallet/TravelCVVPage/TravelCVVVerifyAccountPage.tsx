@@ -28,12 +28,15 @@ function TravelCVVVerifyAccountPage() {
     const [cardList] = useOnyx(ONYXKEYS.CARD_LIST);
 
     const {isLoading, validateError} = useTravelCVVState();
-    const {setCvv, setIsLoading, setValidateError} = useTravelCVVActions();
+    const {setCvv, setIsLoading, setValidateError, isReturningFromVerifyRef} = useTravelCVVActions();
 
     const primaryLogin = usePrimaryContactMethod();
     const travelCard = getTravelBillingCard(cardList);
 
     const navigateBack = () => {
+        // If the Travel CVV page is not under this page, goBack replaces this page with a new
+        // Travel CVV page. Tell it not to auto-open this page again.
+        isReturningFromVerifyRef.current = true;
         Navigation.goBack(ROUTES.SETTINGS_WALLET_TRAVEL_CVV);
     };
 
