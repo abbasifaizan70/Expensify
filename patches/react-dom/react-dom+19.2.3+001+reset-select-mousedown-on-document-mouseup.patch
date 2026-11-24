@@ -1,0 +1,60 @@
+diff --git a/node_modules/react-dom/cjs/react-dom-client.development.js b/node_modules/react-dom/cjs/react-dom-client.development.js
+index 771ecad..7f6b28f 100644
+--- a/node_modules/react-dom/cjs/react-dom-client.development.js
++++ b/node_modules/react-dom/cjs/react-dom-client.development.js
+@@ -19222,7 +19222,9 @@
+         null === ownerDocument ||
+           ownerDocument[listeningMarker] ||
+           ((ownerDocument[listeningMarker] = !0),
+-          listenToNativeEvent("selectionchange", !1, ownerDocument));
++          listenToNativeEvent("selectionchange", !1, ownerDocument),
++      // Reset SelectEventPlugin's mouseDown flag when a drag selection is released outside of every root.
++      listenToNativeEvent("mouseup", !1, ownerDocument));
+       }
+     }
+     function addTrappedEventListener(
+diff --git a/node_modules/react-dom/cjs/react-dom-client.production.js b/node_modules/react-dom/cjs/react-dom-client.production.js
+index ee02bbd..90e943d 100644
+--- a/node_modules/react-dom/cjs/react-dom-client.production.js
++++ b/node_modules/react-dom/cjs/react-dom-client.production.js
+@@ -12361,7 +12361,9 @@ function listenToAllSupportedEvents(rootContainerElement) {
+     null === ownerDocument ||
+       ownerDocument[listeningMarker] ||
+       ((ownerDocument[listeningMarker] = !0),
+-      listenToNativeEvent("selectionchange", !1, ownerDocument));
++      listenToNativeEvent("selectionchange", !1, ownerDocument),
++      // Reset SelectEventPlugin's mouseDown flag when a drag selection is released outside of every root.
++      listenToNativeEvent("mouseup", !1, ownerDocument));
+   }
+ }
+ function addTrappedEventListener(
+diff --git a/node_modules/react-dom/cjs/react-dom-profiling.development.js b/node_modules/react-dom/cjs/react-dom-profiling.development.js
+index c8b583c..e58ff1d 100644
+--- a/node_modules/react-dom/cjs/react-dom-profiling.development.js
++++ b/node_modules/react-dom/cjs/react-dom-profiling.development.js
+@@ -19230,7 +19230,9 @@
+         null === ownerDocument ||
+           ownerDocument[listeningMarker] ||
+           ((ownerDocument[listeningMarker] = !0),
+-          listenToNativeEvent("selectionchange", !1, ownerDocument));
++          listenToNativeEvent("selectionchange", !1, ownerDocument),
++      // Reset SelectEventPlugin's mouseDown flag when a drag selection is released outside of every root.
++      listenToNativeEvent("mouseup", !1, ownerDocument));
+       }
+     }
+     function addTrappedEventListener(
+diff --git a/node_modules/react-dom/cjs/react-dom-profiling.profiling.js b/node_modules/react-dom/cjs/react-dom-profiling.profiling.js
+index 1639385..5972395 100644
+--- a/node_modules/react-dom/cjs/react-dom-profiling.profiling.js
++++ b/node_modules/react-dom/cjs/react-dom-profiling.profiling.js
+@@ -14189,7 +14189,9 @@ function listenToAllSupportedEvents(rootContainerElement) {
+     null === ownerDocument ||
+       ownerDocument[listeningMarker] ||
+       ((ownerDocument[listeningMarker] = !0),
+-      listenToNativeEvent("selectionchange", !1, ownerDocument));
++      listenToNativeEvent("selectionchange", !1, ownerDocument),
++      // Reset SelectEventPlugin's mouseDown flag when a drag selection is released outside of every root.
++      listenToNativeEvent("mouseup", !1, ownerDocument));
+   }
+ }
+ function addTrappedEventListener(
