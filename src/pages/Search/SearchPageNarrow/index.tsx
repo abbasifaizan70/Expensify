@@ -5,6 +5,7 @@ import HeaderWithBackButton from '@components/HeaderWithBackButton';
 import {useHorizontalSafeAreaClipBleed} from '@components/HorizontalSafeArea/useHorizontalSafeAreaReach';
 import NAVIGATION_TABS from '@components/Navigation/NavigationTabBar/NAVIGATION_TABS';
 import useTabBarCoveredHeight from '@components/Navigation/TabBarBottomContent/useTabBarCoveredHeight';
+import useTabRootFooterKeyboardOffset from '@components/Navigation/TabBarBottomContent/useTabRootFooterKeyboardOffset';
 import useTabRootScreenWrapperProps from '@components/Navigation/TabBarBottomContent/useTabRootScreenWrapperProps';
 import PulsingView from '@components/PulsingView';
 import ReceiptScanDropZone from '@components/ReceiptScanDropZone';
@@ -112,6 +113,7 @@ function SearchPageNarrow({
     const {pageGutterMargin} = useLayoutSpacing();
     const tabRootScreenWrapperProps = useTabRootScreenWrapperProps(NAVIGATION_TABS.SEARCH);
     const tabBarCoveredHeight = useTabBarCoveredHeight();
+    const tabRootFooterKeyboardOffset = useTabRootFooterKeyboardOffset();
     // The footer is shown and hidden by its own selection state, so its height is read from layout.
     const [footerHeight, setFooterHeight] = useState(0);
     const StyleUtils = useStyleUtils();
@@ -355,6 +357,8 @@ function SearchPageNarrow({
                     shouldShowOfflineIndicator={!!searchResults}
                     {...tabRootScreenWrapperProps}
                     offlineIndicatorStyle={[styles.mtAuto, footerHeight > 0 ? styles.offlineIndicatorAboveFooter(footerHeight) : tabRootScreenWrapperProps.offlineIndicatorStyle]}
+                    // The keyboard covers the tab bar band the footer pads past, so that whole band goes under the keyboard
+                    keyboardVerticalOffset={footerHeight > 0 ? tabRootFooterKeyboardOffset : undefined}
                 >
                     <View style={[styles.flex1, styles.overflowHidden, horizontalSafeAreaClipBleedStyle]}>
                         {!shouldScrollMainHeader && !isMobileSelectionModeEnabled && (
