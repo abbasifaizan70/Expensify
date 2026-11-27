@@ -55,7 +55,6 @@ import {
     getVisibleReportActionErrors,
     isMessageDeleted,
     isMoneyRequestAction,
-    isPendingRemove,
     isTripPreview,
     isWhisperActionTargetedToOthers,
     shouldHidePayAction,
@@ -388,6 +387,8 @@ function ReportActionItem({
     // Hide the message if it is being moderated for a higher offense, or is hidden by a moderator
     // Removed messages should not be shown anyway and should not need this flow
     const latestDecision = getReportActionMessage(action)?.moderationDecision?.decision ?? '';
+    // Only re-run when the decision, the action type, or the action shown in this row changes. Depending on the whole
+    // `action` object re-hid a revealed message every time the same action was re-merged, e.g. after adding a reaction.
     useEffect(() => {
         if (action.actionName !== CONST.REPORT.ACTIONS.TYPE.ADD_COMMENT) {
             return;
@@ -399,12 +400,15 @@ function ReportActionItem({
             return;
         }
 
-        if (![CONST.MODERATION.MODERATOR_DECISION_APPROVED, CONST.MODERATION.MODERATOR_DECISION_PENDING].some((item) => item === latestDecision) && !isPendingRemove(action)) {
+        if (
+            ![CONST.MODERATION.MODERATOR_DECISION_APPROVED, CONST.MODERATION.MODERATOR_DECISION_PENDING].some((item) => item === latestDecision) &&
+            latestDecision !== CONST.MODERATION.MODERATOR_DECISION_PENDING_REMOVE
+        ) {
             setIsHidden(true);
             return;
         }
         setIsHidden(false);
-    }, [latestDecision, action, setIsHidden]);
+    }, [latestDecision, action.reportActionID, action.actionName, setIsHidden]);
 
     const toggleContextMenuFromActiveReportAction = () => {
         setIsContextMenuActive(isActiveReportAction(action.reportActionID));
